@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package resourceservice;
+
+option go_package = "github.com/stuttgart-things/maschinist";
+
+// Define the ResourceStatus struct
+message ResourceStatus {
+    string name = 1;
+    string kind = 2;
+    bool ready = 3;
+    string status_message = 4;
+    string connection_details = 5; // New field for IPs or connection details
+}
+
+// Request message with count and kind parameters
+message ResourceRequest {
+    int32 count = 1; // Number of resources to return (default: all)
+    string kind = 2; // Kind of resources to fetch (default: "*")
+}
+
+// Define the response containing a list of ResourceStatus objects
+message ResourceListResponse {
+    repeated ResourceStatus resources = 1;
+}
+
+// Service definition
+service ResourceService {
+    rpc GetResources(ResourceRequest) returns (ResourceListResponse);
+}
