@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
@@ -19,17 +20,21 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+var (
+	// READ KUBECONFIG VAR FROM ENV
+	kubeconfig = os.Getenv("KUBECONFIG")
+)
+
 type server struct {
 	resourceservice.UnimplementedResourceServiceServer
 	dynamicClient dynamic.Interface
 }
 
 func main() {
-	kubeconfig := flag.String("kubeconfig", "/home/sthings/.kube/manager-dev", "Path to the kubeconfig file")
 	flag.Parse()
 
 	// Initialize Kubernetes client
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		log.Fatalf("Error loading kubeconfig: %v", err)
 	}
