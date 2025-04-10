@@ -12,9 +12,31 @@ vars:
   VERSION:
     sh: |
       [ "$(git branch --show-current)" != "main" ] && echo "dev-$(git describe --tags --abbrev=0)" || echo $(git describe --tags --abbrev=0)
+
 dotenv: ['.env', '{{.HOME}}/.env']
 
 tasks:
+  server:
+    desc: Start server
+    cmds:
+      - go run main.go
+
+  client:
+    desc: Start client
+    cmds:
+      - go run client/client.go
+    env:
+      SECURE_CONNECTION:
+        sh: gum choose --header="SECURE_CONNECTION?:" "true" "false"
+      CLUSTERBOOK_SERVER: "localhost:50051"
+
+  do:
+    desc: Select a task to run
+    cmds:
+      - |
+        task=$(yq e '.tasks | keys' Taskfile.yaml | sed 's/^- //' | gum choose)
+        task ${task}
+
   proto:
     desc: Generate go code from proto files
     cmds:

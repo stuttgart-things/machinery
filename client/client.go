@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	secureConnection  = os.Getenv("SECURE_CONNECTION") // Read from env: "true" or "false"
-	clusterBookServer = os.Getenv("CLUSTERBOOK_SERVER")
+	secureConnection  = os.Getenv("SECURE_CONNECTION")  // Read from env: "true" or "false"
+	clusterBookServer = os.Getenv("CLUSTERBOOK_SERVER") // localhost:50051
 )
 
 func main() {
 	// Connect to the gRPC server
-	conn, err := grpc.NewClient("localhost:50051", getCredentials())
+	conn, err := grpc.NewClient(clusterBookServer, getCredentials())
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server: %v", err)
 	}

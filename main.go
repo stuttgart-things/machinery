@@ -91,6 +91,13 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 				Version:  "v1alpha1",
 				Resource: "vspherevmansibles",
 			}
+		case "ProxmoxVMAnsible":
+			gvr = schema.GroupVersionResource{
+				Group:    "resources.stuttgart-things.com",
+				Version:  "v1alpha1",
+				Resource: "proxmoxvmansibles",
+			}
+
 		default:
 			// Skip unknown kinds
 			continue
