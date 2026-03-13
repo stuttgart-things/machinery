@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
@@ -15,9 +16,9 @@ import (
 )
 
 var testListKinds = map[schema.GroupVersionResource]string{
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "ansibleruns"}:       "AnsibleRunList",
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "vspherevmansibles"}: "VsphereVMAnsibleList",
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "proxmoxvmansibles"}: "ProxmoxVMAnsibleList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "harvestervms"}:         "HarvesterVMList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "storageplatforms"}:     "StoragePlatformList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "networkintegrations"}:  "NetworkIntegrationList",
 }
 
 func newTestServer(objects ...runtime.Object) *server {
@@ -50,7 +51,7 @@ func TestGetResources_InvalidKind(t *testing.T) {
 func TestGetResources_InvalidCount(t *testing.T) {
 	s := newTestServer()
 	_, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
-		Kind:  "AnsibleRun",
+		Kind:  "HarvesterVM",
 		Count: 5000,
 	})
 	if err == nil {
@@ -68,7 +69,7 @@ func TestGetResources_InvalidCount(t *testing.T) {
 func TestGetResources_EmptyResult(t *testing.T) {
 	s := newTestServer()
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
-		Kind:  "AnsibleRun",
+		Kind:  "HarvesterVM",
 		Count: -1,
 	})
 	if err != nil {
@@ -83,9 +84,9 @@ func TestGetResources_WithResources(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
-			"kind":       "AnsibleRun",
+			"kind":       "HarvesterVM",
 			"metadata": map[string]any{
-				"name":      "test-run",
+				"name":      "test-vm",
 				"namespace": "default",
 			},
 			"status": map[string]any{
@@ -95,8 +96,15 @@ func TestGetResources_WithResources(t *testing.T) {
 						"status": "True",
 					},
 				},
-				"share": map[string]any{
-					"ips": "10.0.0.1",
+				"vm": map[string]any{
+					"name":  "my-vm",
+					"ready": true,
+				},
+				"volume": map[string]any{
+					"ready": true,
+				},
+				"cloudInit": map[string]any{
+					"ready": true,
 				},
 			},
 		},
@@ -104,13 +112,13 @@ func TestGetResources_WithResources(t *testing.T) {
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "resources.stuttgart-things.com",
 		Version: "v1alpha1",
-		Kind:    "AnsibleRun",
+		Kind:    "HarvesterVM",
 	})
 
 	s := newTestServer(obj)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
-		Kind:  "AnsibleRun",
+		Kind:  "HarvesterVM",
 		Count: -1,
 	})
 	if err != nil {
@@ -121,11 +129,11 @@ func TestGetResources_WithResources(t *testing.T) {
 	}
 
 	r := resp.Resources[0]
-	if r.Name != "test-run" {
-		t.Errorf("expected name test-run, got %s", r.Name)
+	if r.Name != "test-vm" {
+		t.Errorf("expected name test-vm, got %s", r.Name)
 	}
-	if r.Kind != "AnsibleRun" {
-		t.Errorf("expected kind AnsibleRun, got %s", r.Kind)
+	if r.Kind != "HarvesterVM" {
+		t.Errorf("expected kind HarvesterVM, got %s", r.Kind)
 	}
 	if !r.Ready {
 		t.Error("expected ready=true")
@@ -133,8 +141,9 @@ func TestGetResources_WithResources(t *testing.T) {
 	if r.StatusMessage != "Ready" {
 		t.Errorf("expected status Ready, got %s", r.StatusMessage)
 	}
-	if r.ConnectionDetails != "10.0.0.1" {
-		t.Errorf("expected IPs 10.0.0.1, got %s", r.ConnectionDetails)
+	// ConnectionField is "status.vm.name" => "my-vm", plus StatusFields
+	if !strings.Contains(r.ConnectionDetails, "my-vm") {
+		t.Errorf("expected connection details to contain 'my-vm', got %s", r.ConnectionDetails)
 	}
 }
 
@@ -144,15 +153,15 @@ func TestGetResources_CountLimit(t *testing.T) {
 		obj := &unstructured.Unstructured{
 			Object: map[string]any{
 				"apiVersion": "resources.stuttgart-things.com/v1alpha1",
-				"kind":       "AnsibleRun",
+				"kind":       "HarvesterVM",
 				"metadata": map[string]any{
-					"name":      fmt.Sprintf("run-%d", i),
+					"name":      fmt.Sprintf("vm-%d", i),
 					"namespace": "default",
 				},
 			},
 		}
 		obj.SetGroupVersionKind(schema.GroupVersionKind{
-			Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "AnsibleRun",
+			Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 		})
 		objects = append(objects, obj)
 	}
@@ -160,7 +169,7 @@ func TestGetResources_CountLimit(t *testing.T) {
 	s := newTestServer(objects...)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
-		Kind:  "AnsibleRun",
+		Kind:  "HarvesterVM",
 		Count: 2,
 	})
 	if err != nil {
@@ -227,45 +236,93 @@ func TestGetResourceStatus(t *testing.T) {
 	}
 }
 
-func TestGetIps(t *testing.T) {
+func TestGetConnectionDetails(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "test"},
+		"status": map[string]any{
+			"share": map[string]any{"ips": "10.0.0.1"},
+			"vm":    map[string]any{"name": "my-vm"},
+		},
+	}}
+
 	tests := []struct {
-		name string
-		obj  map[string]any
-		want string
+		name      string
+		fieldPath string
+		want      string
 	}{
-		{
-			name: "has IPs",
-			obj: map[string]any{
-				"metadata": map[string]any{"name": "test"},
-				"status": map[string]any{
-					"share": map[string]any{"ips": "10.0.0.1"},
-				},
-			},
-			want: "10.0.0.1",
-		},
-		{
-			name: "no share",
-			obj: map[string]any{
-				"metadata": map[string]any{"name": "test"},
-			},
-			want: "NO STATUS FOUND",
-		},
-		{
-			name: "share without IPs",
-			obj: map[string]any{
-				"metadata": map[string]any{"name": "test"},
-				"status": map[string]any{
-					"share": map[string]any{"other": "value"},
-				},
-			},
-			want: "NO IPS FOUND IN STATUS",
-		},
+		{"nested string", "status.share.ips", "10.0.0.1"},
+		{"vm name", "status.vm.name", "my-vm"},
+		{"empty path", "", ""},
+		{"missing field", "status.nonexistent.field", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obj := &unstructured.Unstructured{Object: tt.obj}
-			got := getIps(obj)
+			got := getConnectionDetails(obj, tt.fieldPath)
+			if got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestGetStatusDetails(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "test"},
+		"status": map[string]any{
+			"installed":       true,
+			"observedVersion": "1.2.3",
+			"volume":          map[string]any{"ready": true},
+		},
+	}}
+
+	tests := []struct {
+		name   string
+		fields []string
+		want   string
+	}{
+		{"bool and string fields", []string{"status.installed", "status.observedVersion"}, "installed=true, observedVersion=1.2.3"},
+		{"nested bool", []string{"status.volume.ready"}, "ready=true"},
+		{"missing fields", []string{"status.nonexistent"}, ""},
+		{"empty fields", nil, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getStatusDetails(obj, tt.fields)
+			if got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestGetNestedField(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "test"},
+		"status": map[string]any{
+			"name":    "my-resource",
+			"ready":   true,
+			"count":   int64(42),
+			"nested":  map[string]any{"deep": "value"},
+		},
+	}}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"string field", "status.name", "my-resource"},
+		{"bool field", "status.ready", "true"},
+		{"int64 field", "status.count", "42"},
+		{"nested field", "status.nested.deep", "value"},
+		{"missing field", "status.missing", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getNestedField(obj, tt.path)
 			if got != tt.want {
 				t.Errorf("expected %q, got %q", tt.want, got)
 			}

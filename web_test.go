@@ -38,21 +38,21 @@ func TestWebResources(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
-			"kind":       "AnsibleRun",
+			"kind":       "HarvesterVM",
 			"metadata": map[string]any{
-				"name":      "web-test-run",
+				"name":      "web-test-vm",
 				"namespace": "default",
 			},
 			"status": map[string]any{
 				"conditions": []any{
 					map[string]any{"type": "Ready", "status": "True"},
 				},
-				"share": map[string]any{"ips": "192.168.1.1"},
+				"vm": map[string]any{"name": "my-vm", "ready": true},
 			},
 		},
 	}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "AnsibleRun",
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 	})
 
 	srv := newTestServer(obj)
@@ -61,7 +61,7 @@ func TestWebResources(t *testing.T) {
 		t.Fatalf("failed to create web server: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/resources?kind=AnsibleRun", nil)
+	req := httptest.NewRequest("GET", "/resources?kind=HarvesterVM", nil)
 	rr := httptest.NewRecorder()
 	webSrv.handler().ServeHTTP(rr, req)
 
@@ -69,11 +69,11 @@ func TestWebResources(t *testing.T) {
 		t.Errorf("expected 200, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "web-test-run") {
+	if !strings.Contains(body, "web-test-vm") {
 		t.Error("expected resource name in response")
 	}
-	if !strings.Contains(body, "192.168.1.1") {
-		t.Error("expected IP in response")
+	if !strings.Contains(body, "my-vm") {
+		t.Error("expected vm name in response")
 	}
 	if !strings.Contains(body, "Ready") {
 		t.Error("expected Ready badge in response")
@@ -87,7 +87,7 @@ func TestWebResourcesEmpty(t *testing.T) {
 		t.Fatalf("failed to create web server: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/resources?kind=AnsibleRun", nil)
+	req := httptest.NewRequest("GET", "/resources?kind=HarvesterVM", nil)
 	rr := httptest.NewRecorder()
 	webSrv.handler().ServeHTTP(rr, req)
 

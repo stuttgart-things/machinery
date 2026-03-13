@@ -173,12 +173,24 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 			}
 			statusMessage, ready := getResourceStatus(&item)
 
+			connDetails := getConnectionDetails(&item, rk.ConnectionField)
+			if len(rk.StatusFields) > 0 {
+				extra := getStatusDetails(&item, rk.StatusFields)
+				if extra != "" {
+					if connDetails != "" {
+						connDetails = connDetails + " | " + extra
+					} else {
+						connDetails = extra
+					}
+				}
+			}
+
 			allResources = append(allResources, &resourceservice.ResourceStatus{
 				Name:              item.GetName(),
 				Kind:              kind,
 				Ready:             ready,
 				StatusMessage:     statusMessage,
-				ConnectionDetails: getIps(&item),
+				ConnectionDetails: connDetails,
 			})
 
 			if req.Count > 0 {
@@ -217,24 +229,47 @@ func getResourceStatus(obj *unstructured.Unstructured) (string, bool) {
 	return "Not Ready", false
 }
 
-func getIps(obj *unstructured.Unstructured) string {
-	share, found, err := unstructured.NestedMap(obj.Object, "status", "share")
-	if err != nil {
-		slog.Error("error reading share status", "resource", obj.GetName(), "error", err)
-		return "ERROR READING STATUS"
+func getConnectionDetails(obj *unstructured.Unstructured, fieldPath string) string {
+	if fieldPath == "" {
+		return ""
 	}
-	if !found {
-		return "NO STATUS FOUND"
+	return getNestedField(obj, fieldPath)
+}
+
+func getStatusDetails(obj *unstructured.Unstructured, fields []string) string {
+	var parts []string
+	for _, field := range fields {
+		val := getNestedField(obj, field)
+		if val != "" {
+			// Use the last segment of the path as the label
+			segments := strings.Split(field, ".")
+			label := segments[len(segments)-1]
+			parts = append(parts, label+"="+val)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
+	segments := strings.Split(fieldPath, ".")
+
+	// Try as string first
+	val, found, err := unstructured.NestedString(obj.Object, segments...)
+	if err == nil && found {
+		return val
 	}
 
-	ips, found, err := unstructured.NestedString(share, "ips")
-	if err != nil {
-		slog.Error("error reading IPs from share", "resource", obj.GetName(), "error", err)
-		return "ERROR READING IPS"
-	}
-	if !found {
-		return "NO IPS FOUND IN STATUS"
+	// Try as bool
+	boolVal, found, err := unstructured.NestedBool(obj.Object, segments...)
+	if err == nil && found {
+		return fmt.Sprintf("%v", boolVal)
 	}
 
-	return ips
+	// Try as int64
+	intVal, found, err := unstructured.NestedInt64(obj.Object, segments...)
+	if err == nil && found {
+		return fmt.Sprintf("%d", intVal)
+	}
+
+	return ""
 }

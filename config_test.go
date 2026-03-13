@@ -95,7 +95,7 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Resources) != 3 {
 		t.Errorf("expected 3 resources, got %d", len(cfg.Resources))
 	}
-	for _, kind := range []string{"AnsibleRun", "VsphereVMAnsible", "ProxmoxVMAnsible"} {
+	for _, kind := range []string{"HarvesterVM", "StoragePlatform", "NetworkIntegration"} {
 		if _, ok := cfg.Resources[kind]; !ok {
 			t.Errorf("expected %s in default resources", kind)
 		}
