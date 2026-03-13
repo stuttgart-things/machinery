@@ -1,0 +1,44 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: machinery
+  description: gRPC service for querying Stuttgart-Things Kubernetes custom resources (AnsibleRun, VsphereVM, ProxmoxVM)
+  tags:
+    - go
+    - grpc
+    - kubernetes
+    - htmx
+  annotations:
+    github.com/project-slug: stuttgart-things/machinery
+    backstage.io/techdocs-ref: dir:.
+  links:
+    - url: https://github.com/stuttgart-things/machinery
+      title: GitHub Repository
+      icon: github
+spec:
+  type: service
+  lifecycle: experimental
+  owner: stuttgart-things
+  system: stuttgart-things
+  providesApis:
+    - machinery-grpc-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: machinery-grpc-api
+  description: gRPC API for querying Kubernetes custom resource status and connection details
+  tags:
+    - grpc
+    - protobuf
+spec:
+  type: grpc
+  lifecycle: experimental
+  owner: stuttgart-things
+  system: stuttgart-things
+  definition: |
+    syntax = "proto3";
+    package resourceservice;
+    service ResourceService {
+      rpc GetResources(ResourceRequest) returns (ResourceListResponse);
+    }
