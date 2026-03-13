@@ -1,0 +1,20 @@
+{
+  "port": 50051,
+  "resources": {
+    "AnsibleRun": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "ansibleruns"
+    },
+    "VsphereVMAnsible": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "vspherevmansibles"
+    },
+    "ProxmoxVMAnsible": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "proxmoxvmansibles"
+    }
+  }
+}
