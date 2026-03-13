@@ -1,12 +1,13 @@
 # stuttgart-things/machinery
 
-gRPC service for querying Stuttgart-Things Kubernetes custom resources (AnsibleRun, VsphereVMAnsible, ProxmoxVMAnsible). Returns resource status, readiness, and connection details (IPs) across namespaces.
+gRPC service for querying Stuttgart-Things Kubernetes custom resources. Watches any Crossplane-managed resource with configurable status field extraction. Returns resource status, readiness, and connection details across namespaces. Includes an HTMX web frontend for browsing resources.
 
 ## Architecture
 
 ```
-Client (gRPC) ──> Machinery Server ──> Kubernetes API ──> CRDs
-                       :50051              (dynamic client)
+Browser (HTMX) ──> HTTP :8080 ──┐
+                                 ├──> Machinery Server ──> Kubernetes API ──> CRDs
+Client (gRPC)  ──> gRPC :50051 ─┘        (dynamic client)
 ```
 
 ## Quick Start
@@ -46,28 +47,43 @@ go run client/client.go
 
 ### Config File
 
-Resource types are configurable via JSON. Set `MACHINERY_CONFIG` to load:
+Resource types are configurable via JSON. Set `MACHINERY_CONFIG` to load a custom config. Each resource kind supports:
+
+- **`group`/`version`/`resource`** — the GVR for the Kubernetes custom resource
+- **`connectionField`** — dot-separated path to extract a primary connection value (e.g., `status.vm.name`)
+- **`statusFields`** — list of dot-separated paths displayed as `label=value` pairs
+
+Field extraction supports string, bool, and int64 types automatically.
 
 ```json
 {
   "port": 50051,
+  "httpPort": 8080,
   "resources": {
-    "AnsibleRun": {
+    "HarvesterVM": {
       "group": "resources.stuttgart-things.com",
       "version": "v1alpha1",
-      "resource": "ansibleruns"
+      "resource": "harvestervms",
+      "connectionField": "status.vm.name",
+      "statusFields": ["status.volume.ready", "status.cloudInit.ready", "status.vm.ready"]
+    },
+    "StoragePlatform": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "storageplatforms",
+      "statusFields": ["status.installed", "status.observedVersion"]
     }
   }
 }
 ```
 
-## Supported Resource Types
+## Default Resource Types
 
-| Kind | API Group | Resource |
-|------|-----------|----------|
-| AnsibleRun | resources.stuttgart-things.com/v1alpha1 | ansibleruns |
-| VsphereVMAnsible | resources.stuttgart-things.com/v1alpha1 | vspherevmansibles |
-| ProxmoxVMAnsible | resources.stuttgart-things.com/v1alpha1 | proxmoxvmansibles |
+| Kind | API Group | Resource | Connection Field |
+|------|-----------|----------|-----------------|
+| HarvesterVM | resources.stuttgart-things.com/v1alpha1 | harvestervms | `status.vm.name` |
+| StoragePlatform | resources.stuttgart-things.com/v1alpha1 | storageplatforms | — |
+| NetworkIntegration | resources.stuttgart-things.com/v1alpha1 | networkintegrations | — |
 
 ## gRPC API
 
@@ -77,10 +93,18 @@ service ResourceService {
 }
 
 message ResourceRequest {
-  string kind = 1;   // e.g. "AnsibleRun" or "*" for all
+  string kind = 1;   // e.g. "HarvesterVM", comma-separated, or "*" for all
   int32 count = 2;   // -1 for all, max 1000
 }
 ```
+
+## Web Frontend
+
+HTMX-based dashboard available at `http://localhost:8080`. Features:
+- Auto-refreshing resource table (10s interval)
+- Filter by resource kind
+- Ready/Not Ready status badges
+- Dark theme
 
 ## Deployment
 
