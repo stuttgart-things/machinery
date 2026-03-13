@@ -136,7 +136,10 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 }
 
 func getResourceStatus(obj *unstructured.Unstructured) (string, bool) {
-	conditions, found, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil {
+		return fmt.Sprintf("Error reading conditions: %v", err), false
+	}
 	if !found {
 		return "No conditions found", false
 	}
@@ -147,34 +150,35 @@ func getResourceStatus(obj *unstructured.Unstructured) (string, bool) {
 			continue
 		}
 
-		// Look for Type: "Ready" with Status: "True"
-		if condition["type"] == "Ready" && condition["status"] == "True" {
-			return "Ready", true
-
+		if condition["type"] == "Ready" {
+			if condition["status"] == "True" {
+				return "Ready", true
+			}
+			return "Not Ready", false
 		}
-
-		return "Not Ready", false
 	}
 
 	return "Not Ready", false
 }
 
 func PrintIps(obj *unstructured.Unstructured) string {
-
-	// Retrieve the "Ips" field from the Share section of the status
-	share, found, _ := unstructured.NestedMap(obj.Object, "status", "share")
+	share, found, err := unstructured.NestedMap(obj.Object, "status", "share")
+	if err != nil {
+		log.Printf("Error reading share status: %v", err)
+		return "ERROR READING STATUS"
+	}
 	if !found {
-		fmt.Println("ℹ️ No Share information found.")
 		return "NO STATUS FOUND"
 	}
 
-	ips, found, _ := unstructured.NestedString(share, "ips")
-	if found {
-		fmt.Printf("🌐 VsphereVMAnsible IPs: %s\n", ips)
-		return ips
-
-	} else {
-		fmt.Println("ℹ️ No IPs found in Share section.")
+	ips, found, err := unstructured.NestedString(share, "ips")
+	if err != nil {
+		log.Printf("Error reading IPs from share: %v", err)
+		return "ERROR READING IPS"
+	}
+	if !found {
 		return "NO IPS FOUND IN STATUS"
 	}
+
+	return ips
 }
