@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -76,16 +77,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	srv := &server{dynamicClient: dynamicClient, config: cfg}
+
 	s := grpc.NewServer()
-	resourceservice.RegisterResourceServiceServer(s, &server{
-		dynamicClient: dynamicClient,
-		config:        cfg,
-	})
+	resourceservice.RegisterResourceServiceServer(s, srv)
 
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(s, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 
+	// Start HTTP server (HTMX frontend)
+	webSrv, err := newWebServer(srv)
+	if err != nil {
+		slog.Error("failed to initialize web server", "error", err)
+		os.Exit(1)
+	}
+
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.HttpPort),
+		Handler: webSrv.handler(),
+	}
+
+	go func() {
+		slog.Info("HTTP server listening", "port", cfg.HttpPort)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server error", "error", err)
+		}
+	}()
+
+	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -93,6 +113,7 @@ func main() {
 		sig := <-sigCh
 		slog.Info("received shutdown signal", "signal", sig)
 		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+		httpServer.Shutdown(context.Background())
 		s.GracefulStop()
 	}()
 
