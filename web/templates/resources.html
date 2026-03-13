@@ -1,0 +1,35 @@
+{{if .Resources}}
+<div class="count">{{len .Resources}} resource{{if ne (len .Resources) 1}}s{{end}} found</div>
+<table class="resource-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Kind</th>
+            <th>Status</th>
+            <th>Message</th>
+            <th>Connection</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Resources}}
+        <tr>
+            <td class="mono">{{.Name}}</td>
+            <td><span class="badge badge-kind">{{.Kind}}</span></td>
+            <td>
+                {{if .Ready}}
+                <span class="badge badge-ready">Ready</span>
+                {{else}}
+                <span class="badge badge-not-ready">Not Ready</span>
+                {{end}}
+            </td>
+            <td>{{.StatusMessage}}</td>
+            <td class="mono">{{.ConnectionDetails}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+{{else}}
+<div class="empty-state">
+    <p>No resources found</p>
+</div>
+{{end}}

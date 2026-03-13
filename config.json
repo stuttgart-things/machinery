@@ -1,5 +1,6 @@
 {
   "port": 50051,
+  "httpPort": 8080,
   "resources": {
     "AnsibleRun": {
       "group": "resources.stuttgart-things.com",

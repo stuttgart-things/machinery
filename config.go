@@ -15,7 +15,8 @@ type ResourceKind struct {
 }
 
 type Config struct {
-	Port      int                     `json:"port"`
+	Port     int                     `json:"port"`
+	HttpPort int                     `json:"httpPort"`
 	Resources map[string]ResourceKind `json:"resources"`
 }
 
@@ -33,6 +34,9 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 50051
 	}
+	if cfg.HttpPort == 0 {
+		cfg.HttpPort = 8080
+	}
 
 	if len(cfg.Resources) == 0 {
 		return nil, fmt.Errorf("config must define at least one resource kind")
@@ -43,7 +47,8 @@ func loadConfig(path string) (*Config, error) {
 
 func defaultConfig() *Config {
 	return &Config{
-		Port: 50051,
+		Port:     50051,
+		HttpPort: 8080,
 		Resources: map[string]ResourceKind{
 			"AnsibleRun": {
 				Group:    "resources.stuttgart-things.com",
