@@ -1,0 +1,3 @@
+config.image: ghcr.io/stuttgart-things/machinery:latest
+config.namespace: machinery
+config.grpcPort: "50051"
