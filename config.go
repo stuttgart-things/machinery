@@ -9,9 +9,11 @@ import (
 )
 
 type ResourceKind struct {
-	Group    string `json:"group"`
-	Version  string `json:"version"`
-	Resource string `json:"resource"`
+	Group           string   `json:"group"`
+	Version         string   `json:"version"`
+	Resource        string   `json:"resource"`
+	ConnectionField string   `json:"connectionField,omitempty"` // dot-separated path, e.g. "status.share.ips"
+	StatusFields    []string `json:"statusFields,omitempty"`    // extra status fields to display
 }
 
 type Config struct {
@@ -50,20 +52,24 @@ func defaultConfig() *Config {
 		Port:     50051,
 		HttpPort: 8080,
 		Resources: map[string]ResourceKind{
-			"AnsibleRun": {
-				Group:    "resources.stuttgart-things.com",
-				Version:  "v1alpha1",
-				Resource: "ansibleruns",
+			"HarvesterVM": {
+				Group:           "resources.stuttgart-things.com",
+				Version:         "v1alpha1",
+				Resource:        "harvestervms",
+				ConnectionField: "status.vm.name",
+				StatusFields:    []string{"status.volume.ready", "status.cloudInit.ready", "status.vm.ready"},
 			},
-			"VsphereVMAnsible": {
-				Group:    "resources.stuttgart-things.com",
-				Version:  "v1alpha1",
-				Resource: "vspherevmansibles",
+			"StoragePlatform": {
+				Group:           "resources.stuttgart-things.com",
+				Version:         "v1alpha1",
+				Resource:        "storageplatforms",
+				StatusFields:    []string{"status.installed", "status.observedVersion"},
 			},
-			"ProxmoxVMAnsible": {
-				Group:    "resources.stuttgart-things.com",
-				Version:  "v1alpha1",
-				Resource: "proxmoxvmansibles",
+			"NetworkIntegration": {
+				Group:           "resources.stuttgart-things.com",
+				Version:         "v1alpha1",
+				Resource:        "networkintegrations",
+				StatusFields:    []string{"status.installed", "status.observedVersion"},
 			},
 		},
 	}

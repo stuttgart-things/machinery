@@ -2,20 +2,24 @@
   "port": 50051,
   "httpPort": 8080,
   "resources": {
-    "AnsibleRun": {
+    "HarvesterVM": {
       "group": "resources.stuttgart-things.com",
       "version": "v1alpha1",
-      "resource": "ansibleruns"
+      "resource": "harvestervms",
+      "connectionField": "status.vm.name",
+      "statusFields": ["status.volume.ready", "status.cloudInit.ready", "status.vm.ready"]
     },
-    "VsphereVMAnsible": {
+    "StoragePlatform": {
       "group": "resources.stuttgart-things.com",
       "version": "v1alpha1",
-      "resource": "vspherevmansibles"
+      "resource": "storageplatforms",
+      "statusFields": ["status.installed", "status.observedVersion"]
     },
-    "ProxmoxVMAnsible": {
+    "NetworkIntegration": {
       "group": "resources.stuttgart-things.com",
       "version": "v1alpha1",
-      "resource": "proxmoxvmansibles"
+      "resource": "networkintegrations",
+      "statusFields": ["status.installed", "status.observedVersion"]
     }
   }
 }
