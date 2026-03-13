@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"os"
@@ -14,8 +15,10 @@ import (
 )
 
 var (
-	secureConnection  = os.Getenv("SECURE_CONNECTION")  // Read from env: "true" or "false"
+	secureConnection  = os.Getenv("SECURE_CONNECTION")  // "true" or "false"
 	clusterBookServer = os.Getenv("CLUSTERBOOK_SERVER") // localhost:50051
+	tlsCACertPath     = os.Getenv("TLS_CA_CERT")        // optional: path to CA cert for verification
+	tlsSkipVerify     = os.Getenv("TLS_SKIP_VERIFY")    // "true" only for development
 )
 
 func main() {
@@ -48,16 +51,32 @@ func main() {
 func getCredentials() grpc.DialOption {
 	switch secureConnection {
 	case "true":
-		log.Println("Using secure gRPC connection")
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true, // Adjust based on your security requirements
+		tlsConfig := &tls.Config{}
+
+		if tlsSkipVerify == "true" {
+			log.Println("WARNING: TLS certificate verification disabled (dev mode)")
+			tlsConfig.InsecureSkipVerify = true
+		} else if tlsCACertPath != "" {
+			caCert, err := os.ReadFile(tlsCACertPath)
+			if err != nil {
+				log.Fatalf("Failed to read CA certificate: %v", err)
+			}
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caCert) {
+				log.Fatalf("Failed to parse CA certificate")
+			}
+			tlsConfig.RootCAs = certPool
+			log.Println("Using secure gRPC connection with custom CA")
+		} else {
+			log.Println("Using secure gRPC connection with system CA pool")
 		}
+
 		return grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
-	case "false":
+	case "false", "":
 		log.Println("Using insecure gRPC connection")
 		return grpc.WithTransportCredentials(insecure.NewCredentials())
 	default:
 		log.Fatalf("Invalid SECURE_CONNECTION value: %s. Expected 'true' or 'false'", secureConnection)
-		return nil // This will never be reached since log.Fatalf exits the program
+		return nil
 	}
 }
