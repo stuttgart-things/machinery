@@ -23,14 +23,14 @@ service = {
                 targetPort: "grpc"
                 protocol: "TCP"
             }
-        ] + (if config.httpEnabled: [
+        ] + ([
             {
                 name: "http"
                 port: config.httpPort
                 targetPort: "http"
                 protocol: "TCP"
             }
-        ] else [])
+        ] if config.httpEnabled else [])
         selector: labels.selectorLabels
     }
 }

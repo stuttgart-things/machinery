@@ -43,13 +43,13 @@ deployment = {
                                 containerPort: config.grpcPort
                                 protocol: "TCP"
                             }
-                        ] + (if config.httpEnabled: [
+                        ] + ([
                             {
                                 name: "http"
                                 containerPort: config.httpPort
                                 protocol: "TCP"
                             }
-                        ] else [])
+                        ] if config.httpEnabled else [])
                         env: [
                             if config.kubeconfigSecret:
                                 {
@@ -115,13 +115,13 @@ deployment = {
                                 name: "tmp"
                                 mountPath: "/tmp"
                             }
-                        ] + (if config.kubeconfigSecret: [
+                        ] + ([
                             {
                                 name: "kubeconfig"
                                 mountPath: "/etc/kubeconfig"
                                 readOnly: True
                             }
-                        ] else [])
+                        ] if config.kubeconfigSecret else [])
                     }
                 ]
                 securityContext: {
@@ -138,14 +138,14 @@ deployment = {
                         name: "tmp"
                         emptyDir: {}
                     }
-                ] + (if config.kubeconfigSecret: [
+                ] + ([
                     {
                         name: "kubeconfig"
                         secret: {
                             secretName: config.kubeconfigSecret
                         }
                     }
-                ] else [])
+                ] if config.kubeconfigSecret else [])
                 affinity: {
                     podAntiAffinity: {
                         preferredDuringSchedulingIgnoredDuringExecution: [
