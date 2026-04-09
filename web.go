@@ -20,8 +20,15 @@ type webServer struct {
 	templates *template.Template
 }
 
+type buildInfo struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
 type indexData struct {
 	Kinds []string
+	Build buildInfo
 }
 
 type resourceData struct {
@@ -71,8 +78,13 @@ func (w *webServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(kinds)
 
+	bi := buildInfo{Version: version, Commit: commit, Date: date}
+	if len(bi.Commit) > 7 {
+		bi.Commit = bi.Commit[:7]
+	}
+
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := w.templates.ExecuteTemplate(rw, "index.html", indexData{Kinds: kinds}); err != nil {
+	if err := w.templates.ExecuteTemplate(rw, "index.html", indexData{Kinds: kinds, Build: bi}); err != nil {
 		slog.Error("failed to render index", "error", err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}

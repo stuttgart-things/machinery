@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Machinery - Resource Dashboard</title>
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/stuttgart-things/docs/main/hugo/sthings-argo.png">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <style>
         :root {
@@ -216,6 +217,21 @@
             color: var(--text);
         }
         .detail-refresh { display: none; }
+        footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        footer .build-info {
+            display: flex;
+            gap: 1.5rem;
+        }
+        footer .build-info span { font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace; }
     </style>
 </head>
 <body>
@@ -249,6 +265,15 @@
              hx-trigger="load, every 5s"
              hx-indicator="#spinner">
         </div>
+
+        <footer>
+            <span>stuttgart-things/machinery</span>
+            <div class="build-info">
+                <span>{{.Build.Version}}</span>
+                <span>{{.Build.Commit}}</span>
+                <span>{{.Build.Date}}</span>
+            </div>
+        </footer>
     </div>
 
     <script>
