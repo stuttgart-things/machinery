@@ -1,0 +1,61 @@
+<div class="detail-view">
+    <button class="back-btn"
+            hx-get="/resources?kind=*"
+            hx-target="#resource-list"
+            hx-push-url="false">
+        &larr; Back to list
+    </button>
+
+    <div class="detail-card">
+        <div class="detail-header">
+            <div>
+                <h2 class="mono">{{.Resource.Name}}</h2>
+                <div class="detail-meta">
+                    <span class="badge badge-kind">{{.Resource.Kind}}</span>
+                    <span class="mono" style="color: var(--text-muted);">{{.Resource.Namespace}}</span>
+                    {{if .Resource.Ready}}
+                    <span class="badge badge-ready">Ready</span>
+                    {{else}}
+                    <span class="badge badge-not-ready">Not Ready</span>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+
+        <div class="detail-section">
+            <h3>Status</h3>
+            <div class="detail-grid">
+                <div class="detail-field">
+                    <span class="detail-label">Message</span>
+                    <span class="detail-value">{{.Resource.StatusMessage}}</span>
+                </div>
+                {{if .Resource.ConnectionDetails}}
+                <div class="detail-field">
+                    <span class="detail-label">Connection</span>
+                    <span class="detail-value mono">{{.Resource.ConnectionDetails}}</span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        {{if .Resource.InfoFields}}
+        <div class="detail-section">
+            <h3>Details</h3>
+            <div class="detail-grid">
+                {{range $key, $value := .Resource.InfoFields}}
+                <div class="detail-field">
+                    <span class="detail-label">{{$key}}</span>
+                    <span class="detail-value mono">{{$value}}</span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+
+    <div class="detail-refresh"
+         hx-get="/detail?kind={{.Resource.Kind}}&name={{.Resource.Name}}&namespace={{.Resource.Namespace}}"
+         hx-target="#resource-list"
+         hx-trigger="every 5s">
+    </div>
+</div>

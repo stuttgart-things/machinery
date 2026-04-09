@@ -27,13 +27,19 @@ type indexData struct {
 type resourceData struct {
 	Name              string
 	Kind              string
+	Namespace         string
 	Ready             bool
 	StatusMessage     string
 	ConnectionDetails string
+	InfoFields        map[string]string
 }
 
 type resourceListData struct {
 	Resources []resourceData
+}
+
+type detailData struct {
+	Resource resourceData
 }
 
 func newWebServer(srv *server) (*webServer, error) {
@@ -48,6 +54,7 @@ func (w *webServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", w.handleIndex)
 	mux.HandleFunc("GET /resources", w.handleResources)
+	mux.HandleFunc("GET /detail", w.handleDetail)
 	mux.HandleFunc("GET /health", w.handleHealth)
 	return mux
 }
@@ -92,15 +99,57 @@ func (w *webServer) handleResources(rw http.ResponseWriter, r *http.Request) {
 		data.Resources = append(data.Resources, resourceData{
 			Name:              res.Name,
 			Kind:              res.Kind,
+			Namespace:         res.Namespace,
 			Ready:             res.Ready,
 			StatusMessage:     res.StatusMessage,
 			ConnectionDetails: res.ConnectionDetails,
+			InfoFields:        res.InfoFields,
 		})
 	}
 
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := w.templates.ExecuteTemplate(rw, "resources.html", data); err != nil {
 		slog.Error("failed to render resources", "error", err)
+		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (w *webServer) handleDetail(rw http.ResponseWriter, r *http.Request) {
+	kind := r.URL.Query().Get("kind")
+	name := r.URL.Query().Get("name")
+	ns := r.URL.Query().Get("namespace")
+
+	if kind == "" || name == "" {
+		http.Error(rw, "kind and name are required", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := w.srv.GetResourceDetail(context.Background(), &resourceservice.ResourceDetailRequest{
+		Kind:      kind,
+		Name:      name,
+		Namespace: ns,
+	})
+	if err != nil {
+		slog.Error("failed to get resource detail", "kind", kind, "name", name, "error", err)
+		http.Error(rw, "Resource not found", http.StatusNotFound)
+		return
+	}
+
+	data := detailData{
+		Resource: resourceData{
+			Name:              resp.Name,
+			Kind:              resp.Kind,
+			Namespace:         resp.Namespace,
+			Ready:             resp.Ready,
+			StatusMessage:     resp.StatusMessage,
+			ConnectionDetails: resp.ConnectionDetails,
+			InfoFields:        resp.InfoFields,
+		},
+	}
+
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := w.templates.ExecuteTemplate(rw, "detail.html", data); err != nil {
+		slog.Error("failed to render detail", "error", err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

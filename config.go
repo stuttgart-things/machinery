@@ -8,12 +8,18 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+type InfoField struct {
+	Label string `json:"label"`
+	Path  string `json:"path"` // dot-separated path, e.g. "spec.vm.name"
+}
+
 type ResourceKind struct {
-	Group           string   `json:"group"`
-	Version         string   `json:"version"`
-	Resource        string   `json:"resource"`
-	ConnectionField string   `json:"connectionField,omitempty"` // dot-separated path, e.g. "status.share.ips"
-	StatusFields    []string `json:"statusFields,omitempty"`    // extra status fields to display
+	Group           string      `json:"group"`
+	Version         string      `json:"version"`
+	Resource        string      `json:"resource"`
+	ConnectionField string      `json:"connectionField,omitempty"` // dot-separated path, e.g. "status.share.ips"
+	StatusFields    []string    `json:"statusFields,omitempty"`    // extra status fields to display
+	InfoFields      []InfoField `json:"infoFields,omitempty"`      // additional fields for detail view
 }
 
 type Config struct {

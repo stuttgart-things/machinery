@@ -185,12 +185,16 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 				}
 			}
 
+			infoFields := getInfoFields(&item, rk.InfoFields)
+
 			allResources = append(allResources, &resourceservice.ResourceStatus{
 				Name:              item.GetName(),
 				Kind:              kind,
 				Ready:             ready,
 				StatusMessage:     statusMessage,
 				ConnectionDetails: connDetails,
+				Namespace:         item.GetNamespace(),
+				InfoFields:        infoFields,
 			})
 
 			if req.Count > 0 {
@@ -248,6 +252,59 @@ func getStatusDetails(obj *unstructured.Unstructured, fields []string) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+func getInfoFields(obj *unstructured.Unstructured, fields []InfoField) map[string]string {
+	result := make(map[string]string)
+	for _, f := range fields {
+		val := getNestedField(obj, f.Path)
+		if val != "" {
+			result[f.Label] = val
+		}
+	}
+	return result
+}
+
+func (s *server) GetResourceDetail(ctx context.Context, req *resourceservice.ResourceDetailRequest) (*resourceservice.ResourceStatus, error) {
+	rk, ok := s.config.Resources[req.Kind]
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported kind %q", req.Kind)
+	}
+
+	gvr := rk.toGVR()
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	item, err := s.dynamicClient.Resource(gvr).Namespace(ns).Get(ctx, req.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "resource %s/%s not found: %v", req.Kind, req.Name, err)
+	}
+
+	statusMessage, ready := getResourceStatus(item)
+	connDetails := getConnectionDetails(item, rk.ConnectionField)
+	if len(rk.StatusFields) > 0 {
+		extra := getStatusDetails(item, rk.StatusFields)
+		if extra != "" {
+			if connDetails != "" {
+				connDetails = connDetails + " | " + extra
+			} else {
+				connDetails = extra
+			}
+		}
+	}
+	infoFields := getInfoFields(item, rk.InfoFields)
+
+	return &resourceservice.ResourceStatus{
+		Name:              item.GetName(),
+		Kind:              req.Kind,
+		Ready:             ready,
+		StatusMessage:     statusMessage,
+		ConnectionDetails: connDetails,
+		Namespace:         item.GetNamespace(),
+		InfoFields:        infoFields,
+	}, nil
 }
 
 func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
