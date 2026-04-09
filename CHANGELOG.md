@@ -1,3 +1,15 @@
+# [1.1.0](https://github.com/stuttgart-things/machinery/compare/v1.0.0...v1.1.0) (2026-04-09)
+
+
+### Bug Fixes
+
+* downgrade go directive to 1.25.0 for CI compatibility ([e02b744](https://github.com/stuttgart-things/machinery/commit/e02b744ab3df84d403deb8ebc648b300aab780d8))
+
+
+### Features
+
+* add infoFields config and clickable detail view ([9adf2e6](https://github.com/stuttgart-things/machinery/commit/9adf2e692c31f8ed6531abd84a15fba8768e1140)), closes [stuttgart-things/machinery#45](https://github.com/stuttgart-things/machinery/issues/45)
+
 # 1.0.0 (2026-03-14)
 
 
