@@ -10,13 +10,22 @@ message ResourceStatus {
     string kind = 2;
     bool ready = 3;
     string status_message = 4;
-    string connection_details = 5; // New field for IPs or connection details
+    string connection_details = 5;
+    string namespace = 6;
+    map<string, string> info_fields = 7;
 }
 
 // Request message with count and kind parameters
 message ResourceRequest {
     int32 count = 1; // Number of resources to return (default: all)
     string kind = 2; // Kind of resources to fetch (default: "*")
+}
+
+// Request for a single resource detail
+message ResourceDetailRequest {
+    string kind = 1;
+    string name = 2;
+    string namespace = 3;
 }
 
 // Define the response containing a list of ResourceStatus objects
@@ -27,4 +36,5 @@ message ResourceListResponse {
 // Service definition
 service ResourceService {
     rpc GetResources(ResourceRequest) returns (ResourceListResponse);
+    rpc GetResourceDetail(ResourceDetailRequest) returns (ResourceStatus);
 }
