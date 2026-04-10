@@ -219,19 +219,21 @@
         .detail-refresh { display: none; }
         footer {
             margin-top: 2rem;
-            padding-top: 1rem;
+            padding: 1rem 0;
             border-top: 1px solid var(--border);
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            justify-content: center;
+            gap: 2rem;
             font-size: 0.75rem;
             color: var(--text-muted);
         }
-        footer .build-info {
+        .footer-item {
             display: flex;
-            gap: 1.5rem;
+            align-items: center;
+            gap: 0.35rem;
         }
-        footer .build-info span { font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace; }
+        .footer-label { color: var(--text-muted); }
+        .footer-value { color: #94a3b8; font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace; }
     </style>
 </head>
 <body>
@@ -267,12 +269,10 @@
         </div>
 
         <footer>
-            <span>stuttgart-things/machinery</span>
-            <div class="build-info">
-                <span>{{.Build.Version}}</span>
-                <span>{{.Build.Commit}}</span>
-                <span>{{.Build.Date}}</span>
-            </div>
+            <div class="footer-item"><span class="footer-label">version</span> <span class="footer-value">{{.Build.Version}}</span></div>
+            <div class="footer-item"><span class="footer-label">commit</span> <span class="footer-value">{{.Build.Commit}}</span></div>
+            <div class="footer-item"><span class="footer-label">built</span> <span class="footer-value">{{.Build.Date}}</span></div>
+            <div class="footer-item" style="margin-left:auto"><span class="footer-label">a</span> <a href="https://github.com/stuttgart-things" target="_blank" style="color:#818cf8;text-decoration:none">stuttgart-things</a> <span class="footer-label">project</span> <img src="https://raw.githubusercontent.com/stuttgart-things/docs/main/hugo/sthings-logo.png" alt="sthings" style="height:24px;vertical-align:middle"></div>
         </footer>
     </div>
 
