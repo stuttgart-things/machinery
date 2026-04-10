@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/stuttgart-things/machinery/compare/v1.2.1...v1.3.0) (2026-04-10)
+
+
+### Features
+
+* rework README and align footer with clusterbook branding ([a9c58a2](https://github.com/stuttgart-things/machinery/commit/a9c58a22e0c3de91014d23df8260117e7759df24))
+
 ## [1.2.1](https://github.com/stuttgart-things/machinery/compare/v1.2.0...v1.2.1) (2026-04-10)
 
 
