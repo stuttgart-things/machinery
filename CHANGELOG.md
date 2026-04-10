@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/stuttgart-things/machinery/compare/v1.1.0...v1.2.0) (2026-04-10)
+
+
+### Features
+
+* add build info footer and favicon ([0881ecd](https://github.com/stuttgart-things/machinery/commit/0881ecd3a955c0abbf12d2a535d0a00967f3636d)), closes [#43](https://github.com/stuttgart-things/machinery/issues/43) [#44](https://github.com/stuttgart-things/machinery/issues/44)
+
 # [1.1.0](https://github.com/stuttgart-things/machinery/compare/v1.0.0...v1.1.0) (2026-04-09)
 
 
