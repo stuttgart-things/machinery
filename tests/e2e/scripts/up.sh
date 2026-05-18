@@ -53,6 +53,13 @@ kubectl wait --for=condition=Established \
   --timeout=60s
 
 echo "==> render + apply KCL manifests"
+# Pre-warm the kcl module cache. On a cold cache, `kcl run` writes
+# `downloading 'kcl-lang/k8s:1.31' from ...` to STDOUT (not stderr), which
+# corrupts the YAML stream and makes kubectl reject the apply with
+# "yaml: line 2: mapping values are not allowed in this context".
+# Discarding the first run gives us a clean second run.
+kcl run "${REPO_ROOT}/kcl/main.k" -Y "${KCL_PROFILE}" >/dev/null
+
 # `kcl run` emits a single doc with `manifests: [...]`; split it and feed
 # each element to kubectl. Mirrors the snippet in kcl/README.md.
 kcl run "${REPO_ROOT}/kcl/main.k" -Y "${KCL_PROFILE}" \
