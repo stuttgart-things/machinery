@@ -130,6 +130,10 @@ Machinery can be deployed via [Flux CD](https://fluxcd.io/) using OCI-based Kust
 
 The upstream app manifests define the base deployment, while per-cluster configs customize version, hostname, gateway, and resource configuration via `postBuild.substitute` and strategic merge patches.
 
+### PR preview environments
+
+Labelling a pull request with `preview` triggers `push-kustomize-pr.yaml` to publish `pr-<n>-<sha>`-tagged image and kustomize artifacts. An Argo `ApplicationSet` ([`stuttgart-things/argocd@platforms/machinery-pr-preview`](https://github.com/stuttgart-things/argocd/tree/main/platforms/machinery-pr-preview)) then deploys them onto opt-in clusters and posts the preview URL back on the PR. Closing the PR tears the environment down and `cleanup-pr-artifacts.yaml` removes the OCI tags.
+
 ### Container Image
 
 Built with [ko](https://ko.build/) on `cgr.dev/chainguard/static:latest` (distroless). Version, commit, and date are injected via ldflags at build time.
