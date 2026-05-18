@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/stuttgart-things/machinery/compare/v1.3.2...v1.4.0) (2026-05-18)
+
+
+### Features
+
+* add kind-based e2e job ([00844cc](https://github.com/stuttgart-things/machinery/commit/00844cc909bda2c6179bf2438384b6b152e24380))
+
 ## [1.3.2](https://github.com/stuttgart-things/machinery/compare/v1.3.1...v1.3.2) (2026-05-18)
 
 
