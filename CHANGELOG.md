@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/stuttgart-things/machinery/compare/v1.3.1...v1.3.2) (2026-05-18)
+
+
+### Bug Fixes
+
+* **deps:** update module google.golang.org/grpc to v1.81.1 ([d2d9403](https://github.com/stuttgart-things/machinery/commit/d2d94037015de20a1c5b10805778f03eda9b1c06))
+
 ## [1.3.1](https://github.com/stuttgart-things/machinery/compare/v1.3.0...v1.3.1) (2026-05-18)
 
 
