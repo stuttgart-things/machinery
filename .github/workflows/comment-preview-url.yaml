@@ -1,0 +1,20 @@
+---
+# Post a "preview env is at <URL>" comment back on the PR when it opens
+# or is reopened. The hostname pattern and namespace prefix here must
+# match the AppSet in stuttgart-things/argocd
+# (platforms/machinery-pr-preview/appset-machinery-pr-preview.yaml).
+name: Comment Preview URL on PR
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches:
+      - main
+
+jobs:
+  comment:
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-comment-preview-url.yaml@main
+    with:
+      hostname-prefix: machinery-pr
+      hostname-domain: homerun2-dev.sthings-vsphere.labul.sva.de
+      namespace-prefix: machinery-pr
+    secrets: inherit # pragma: allowlist secret
