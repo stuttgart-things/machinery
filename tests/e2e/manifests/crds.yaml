@@ -1,0 +1,73 @@
+---
+# Minimal CRDs matching the three resource kinds in `defaultConfig()`.
+# Schemas are intentionally permissive (x-kubernetes-preserve-unknown-fields)
+# so the test fixtures can set arbitrary status/spec fields without listing
+# every property up front.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: harvestervms.resources.stuttgart-things.com
+spec:
+  group: resources.stuttgart-things.com
+  scope: Namespaced
+  names:
+    plural: harvestervms
+    singular: harvestervm
+    kind: HarvesterVM
+    listKind: HarvesterVMList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: storageplatforms.resources.stuttgart-things.com
+spec:
+  group: resources.stuttgart-things.com
+  scope: Namespaced
+  names:
+    plural: storageplatforms
+    singular: storageplatform
+    kind: StoragePlatform
+    listKind: StoragePlatformList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: networkintegrations.resources.stuttgart-things.com
+spec:
+  group: resources.stuttgart-things.com
+  scope: Namespaced
+  names:
+    plural: networkintegrations
+    singular: networkintegration
+    kind: NetworkIntegration
+    listKind: NetworkIntegrationList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}

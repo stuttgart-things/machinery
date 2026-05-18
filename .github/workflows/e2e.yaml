@@ -1,0 +1,100 @@
+---
+name: CI - E2E
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e (kind + machinery + test CRDs)
+    # Dedicated kind-only runners (kind-testing-runner-1 / -2). The
+    # concurrency group above keeps only one job running at a time; the
+    # second runner is hot spare or room for a sibling project. Same pattern
+    # as stuttgart-things/function-homerun2-pitcher.
+    runs-on: [self-hosted, kind-testing-runner-1]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+
+    env:
+      KIND_VERSION: v0.24.0
+      KUBECTL_VERSION: v1.31.0
+      HELM_VERSION: v3.16.2
+      TASK_VERSION: v3.39.2
+      KO_VERSION: v0.17.1
+      KCL_VERSION: v0.11.0
+      YQ_VERSION: v4.44.3
+      KIND_CLUSTER: machinery-e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install kind + kubectl + helm + task + ko + kcl + yq
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSLo "$HOME/.local/bin/kind"    "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          curl -fsSLo "$HOME/.local/bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          curl -fsSLo "$HOME/.local/bin/yq"      "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" --strip-components=1 linux-amd64/helm
+          curl -fsSL "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_linux_amd64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" task
+          curl -fsSL "https://github.com/ko-build/ko/releases/download/${KO_VERSION}/ko_${KO_VERSION#v}_Linux_x86_64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" ko
+          curl -fsSL "https://github.com/kcl-lang/cli/releases/download/${KCL_VERSION}/kcl-${KCL_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" kcl
+          chmod +x "$HOME/.local/bin"/kind "$HOME/.local/bin"/kubectl "$HOME/.local/bin"/yq \
+                   "$HOME/.local/bin"/helm "$HOME/.local/bin"/task "$HOME/.local/bin"/ko \
+                   "$HOME/.local/bin"/kcl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/kind" version
+          "$HOME/.local/bin/kubectl" version --client
+          "$HOME/.local/bin/helm" version
+          "$HOME/.local/bin/task" --version
+          "$HOME/.local/bin/ko" version
+          "$HOME/.local/bin/kcl" --version
+          "$HOME/.local/bin/yq" --version
+
+      - name: Scrub leftover kind cluster
+        run: kind delete cluster --name "${KIND_CLUSTER}" || true
+
+      - name: Pre-run diagnostics
+        run: |
+          echo "=== docker ps -a ==="; docker ps -a || true
+          echo "=== free -h ==="; free -h || true
+          echo "=== df -h ==="; df -h /var/lib/docker / || true
+
+      # Cluster diagnostics live inside tests/e2e/scripts/up.sh on a bash
+      # EXIT trap — running them here would be too late (the outer Taskfile
+      # trap calls `task e2e:down` first and deletes the cluster).
+      - name: Run e2e
+        run: task e2e
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER}" || true
+
+      - name: Post-run diagnostics (on failure only)
+        if: failure()
+        run: |
+          echo "=== docker ps -a ==="; docker ps -a || true
+          echo "=== free -h ==="; free -h || true
+          echo "=== df -h ==="; df -h /var/lib/docker / || true
+          echo "=== last 200 lines of dockerd journal ==="
+          journalctl -u docker --no-pager -n 200 || true

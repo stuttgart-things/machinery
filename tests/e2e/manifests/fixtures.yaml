@@ -1,0 +1,57 @@
+---
+# Fixtures covering all three kinds in the default config. Status fields
+# match the paths listed in main.go's defaultConfig() so the gRPC response
+# carries non-empty status/info data the test can assert against.
+apiVersion: resources.stuttgart-things.com/v1alpha1
+kind: HarvesterVM
+metadata:
+  name: e2e-vm-ready
+  namespace: default
+spec:
+  vm:
+    name: e2e-vm-ready
+status:
+  vm:
+    name: e2e-vm-ready
+    ready: true
+  volume:
+    ready: true
+  cloudInit:
+    ready: true
+---
+apiVersion: resources.stuttgart-things.com/v1alpha1
+kind: HarvesterVM
+metadata:
+  name: e2e-vm-pending
+  namespace: default
+spec:
+  vm:
+    name: e2e-vm-pending
+status:
+  vm:
+    name: e2e-vm-pending
+    ready: false
+  volume:
+    ready: true
+  cloudInit:
+    ready: false
+---
+apiVersion: resources.stuttgart-things.com/v1alpha1
+kind: StoragePlatform
+metadata:
+  name: e2e-storage
+  namespace: default
+spec: {}
+status:
+  installed: true
+  observedVersion: "1.2.3"
+---
+apiVersion: resources.stuttgart-things.com/v1alpha1
+kind: NetworkIntegration
+metadata:
+  name: e2e-network
+  namespace: default
+spec: {}
+status:
+  installed: true
+  observedVersion: "4.5.6"

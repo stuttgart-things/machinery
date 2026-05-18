@@ -12,6 +12,9 @@ vars:
   VERSION:
     sh: |
       [ "$(git branch --show-current)" != "main" ] && echo "dev-$(git describe --tags --abbrev=0)" || echo $(git describe --tags --abbrev=0)
+  KIND_CLUSTER: machinery-e2e
+  E2E_IMAGE: machinery:e2e
+  E2E_NS: machinery
 
 dotenv: ['.env', '{{.HOME}}/.env']
 
@@ -80,3 +83,57 @@ tasks:
           echo "no changes"
         fi
         git push origin -u {{ .BRANCH }}
+
+  e2e:up:
+    desc: Create kind cluster, build + load machinery image with ko, install test CRDs/RBAC, deploy via KCL, apply fixtures
+    cmds:
+      - bash tests/e2e/scripts/up.sh
+    env:
+      KIND_CLUSTER: "{{.KIND_CLUSTER}}"
+      E2E_IMAGE: "{{.E2E_IMAGE}}"
+      E2E_NS: "{{.E2E_NS}}"
+
+  e2e:test:
+    desc: Port-forward machinery and run the gRPC e2e tests against the running kind cluster
+    cmds:
+      # `go test` runs in the foreground, the port-forward in the background;
+      # `trap … EXIT` reaps the port-forward whether tests pass or fail so the
+      # next run isn't blocked by a stale forward on :50051.
+      - |
+        set -eu
+        kubectl -n {{.E2E_NS}} port-forward svc/machinery 50051:50051 >/tmp/machinery-pf.log 2>&1 &
+        PF_PID=$!
+        trap 'kill ${PF_PID} 2>/dev/null || true' EXIT
+        # Wait for the forward to actually bind before dialing. `kubectl
+        # port-forward` returns immediately but the listener takes a moment.
+        for i in $(seq 1 30); do
+          if (echo > /dev/tcp/127.0.0.1/50051) 2>/dev/null; then break; fi
+          sleep 1
+        done
+        E2E_GRPC_ADDR=localhost:50051 go test -tags=e2e -v -count=1 ./tests/e2e/...
+
+  e2e:dump:
+    desc: Dump pods, logs, events, fixtures from the e2e cluster
+    cmds:
+      - bash tests/e2e/scripts/dump.sh
+    env:
+      E2E_NS: "{{.E2E_NS}}"
+
+  e2e:down:
+    desc: Tear down the kind cluster
+    cmds:
+      - kind delete cluster --name {{.KIND_CLUSTER}} || true
+
+  e2e:
+    desc: Full e2e — bring up, run tests, dump-on-failure, tear down
+    cmds:
+      # mvdan/sh doesn't accept named signals in `trap`; EXIT covers normal
+      # exit + `set -e` failures, which is what CI needs for cleanup.
+      # `task e2e:dump` always runs — a tiny bit of noise on the green path
+      # is better than the alternative (conditional dump bodies under mvdan/sh
+      # silently skipped on failure in the pitcher project).
+      - |
+        set -eu
+        trap 'task e2e:dump || true; task e2e:down' EXIT
+        task e2e:up
+        task e2e:test

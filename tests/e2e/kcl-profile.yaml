@@ -1,0 +1,15 @@
+kcl_options:
+  - key: config.image
+    value: machinery:e2e
+  - key: config.imagePullPolicy
+    value: IfNotPresent
+  - key: config.namespace
+    value: machinery
+  - key: config.grpcPort
+    value: 50051
+  - key: config.httpEnabled
+    value: True
+  - key: config.httpPort
+    value: 8080
+  - key: config.httpRouteEnabled
+    value: False

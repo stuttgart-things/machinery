@@ -1,0 +1,28 @@
+---
+# Cluster-wide read access for the three resource kinds machinery's default
+# config watches. The KCL deployment ships a ServiceAccount but no RBAC —
+# this binding closes that gap for the e2e cluster only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: machinery-e2e-reader
+rules:
+  - apiGroups: ["resources.stuttgart-things.com"]
+    resources:
+      - harvestervms
+      - storageplatforms
+      - networkintegrations
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: machinery-e2e-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: machinery-e2e-reader
+subjects:
+  - kind: ServiceAccount
+    name: machinery
+    namespace: machinery
