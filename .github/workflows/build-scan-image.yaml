@@ -14,7 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # PR builds: tag with pr-<n>-<sha> + pr-<n> so the PR-preview AppSet
+  # in stuttgart-things/argocd can pin to the head_sha-tagged image.
+  build-pr:
+    if: github.event_name == 'pull_request'
+    uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
+    with:
+      runs-on: ubuntu-latest
+      registry: ghcr.io
+      tags: pr-${{ github.event.number }}-${{ github.event.pull_request.head.sha }},pr-${{ github.event.number }}
+    secrets: inherit # pragma: allowlist secret
+
+  # main / workflow_dispatch builds: default tagging (release/sha/latest).
+  build-main:
+    if: github.event_name != 'pull_request'
     uses: stuttgart-things/github-workflow-templates/.github/workflows/call-ko-build.yaml@main
     with:
       runs-on: ubuntu-latest
