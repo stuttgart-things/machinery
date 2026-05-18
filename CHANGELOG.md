@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/stuttgart-things/machinery/compare/v1.4.0...v1.4.1) (2026-05-18)
+
+
+### Bug Fixes
+
+* **e2e:** pre-warm kcl module cache so first run doesn't pollute stdout ([a1d1d78](https://github.com/stuttgart-things/machinery/commit/a1d1d7889a17ea14e6cf2d25ab16b30cae9b1cc8))
+
 # [1.4.0](https://github.com/stuttgart-things/machinery/compare/v1.3.2...v1.4.0) (2026-05-18)
 
 
