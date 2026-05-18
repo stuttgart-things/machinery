@@ -96,21 +96,12 @@ tasks:
   e2e:test:
     desc: Port-forward machinery and run the gRPC e2e tests against the running kind cluster
     cmds:
-      # `go test` runs in the foreground, the port-forward in the background;
-      # `trap … EXIT` reaps the port-forward whether tests pass or fail so the
-      # next run isn't blocked by a stale forward on :50051.
-      - |
-        set -eu
-        kubectl -n {{.E2E_NS}} port-forward svc/machinery 50051:50051 >/tmp/machinery-pf.log 2>&1 &
-        PF_PID=$!
-        trap 'kill ${PF_PID} 2>/dev/null || true' EXIT
-        # Wait for the forward to actually bind before dialing. `kubectl
-        # port-forward` returns immediately but the listener takes a moment.
-        for i in $(seq 1 30); do
-          if (echo > /dev/tcp/127.0.0.1/50051) 2>/dev/null; then break; fi
-          sleep 1
-        done
-        E2E_GRPC_ADDR=localhost:50051 go test -tags=e2e -v -count=1 ./tests/e2e/...
+      # Logic lives in test.sh: mvdan/sh (Task's embedded shell) treats `$!`
+      # as unbound under `set -u`, so the port-forward + PID-capture has to
+      # run under real bash.
+      - bash tests/e2e/scripts/test.sh
+    env:
+      E2E_NS: "{{.E2E_NS}}"
 
   e2e:dump:
     desc: Dump pods, logs, events, fixtures from the e2e cluster
