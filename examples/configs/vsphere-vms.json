@@ -1,0 +1,39 @@
+{
+  "port": 50051,
+  "httpPort": 8080,
+  "resources": {
+    "VsphereVM": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "vspherevms",
+      "connectionField": "status.share.ip",
+      "statusFields": [
+        "status.share.ip"
+      ],
+      "infoFields": [
+        { "label": "Datacenter", "path": "spec.vm.datacenter" },
+        { "label": "Template",   "path": "spec.vm.template" },
+        { "label": "Network",    "path": "spec.vm.network" },
+        { "label": "CPU",        "path": "spec.vm.numCPUs" },
+        { "label": "Memory MB",  "path": "spec.vm.memoryMB" }
+      ]
+    },
+    "HarvesterVM": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "harvestervms",
+      "connectionField": "status.vm.name",
+      "statusFields": [
+        "status.volume.ready",
+        "status.cloudInit.ready",
+        "status.vm.ready"
+      ],
+      "infoFields": [
+        { "label": "Image",   "path": "spec.vm.image" },
+        { "label": "CPU",     "path": "spec.vm.cpu" },
+        { "label": "Memory",  "path": "spec.vm.memory" },
+        { "label": "Disk GB", "path": "spec.vm.diskSizeGB" }
+      ]
+    }
+  }
+}

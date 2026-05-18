@@ -60,7 +60,7 @@ message ResourceStatus {
 
 ## Configuration
 
-Resource types are configurable via JSON. Set `MACHINERY_CONFIG` to load a custom config file.
+Resource types are configurable via JSON. Set `MACHINERY_CONFIG` to load a custom config file. Drop-in examples for common watch sets (VsphereVM, platform XRs, AnsibleRun, …) live in [`examples/configs/`](examples/configs/).
 
 ### Environment Variables
 
