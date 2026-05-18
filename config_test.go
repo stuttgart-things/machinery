@@ -102,6 +102,30 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+// Each file under examples/configs/ is published as a recommended drop-in
+// for MACHINERY_CONFIG. They MUST parse cleanly via loadConfig — schema
+// drift here breaks users who copy them, so guard it in CI.
+func TestExampleConfigsParse(t *testing.T) {
+	matches, err := filepath.Glob("examples/configs/*.json")
+	if err != nil {
+		t.Fatalf("globbing examples/configs: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("no example configs found under examples/configs/")
+	}
+	for _, path := range matches {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			cfg, err := loadConfig(path)
+			if err != nil {
+				t.Fatalf("loadConfig(%s): %v", path, err)
+			}
+			if len(cfg.Resources) == 0 {
+				t.Errorf("%s defines no resources", path)
+			}
+		})
+	}
+}
+
 func TestResourceKindToGVR(t *testing.T) {
 	rk := ResourceKind{
 		Group:    "resources.stuttgart-things.com",

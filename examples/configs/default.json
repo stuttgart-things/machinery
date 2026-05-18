@@ -1,0 +1,35 @@
+{
+  "port": 50051,
+  "httpPort": 8080,
+  "resources": {
+    "HarvesterVM": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "harvestervms",
+      "connectionField": "status.vm.name",
+      "statusFields": [
+        "status.volume.ready",
+        "status.cloudInit.ready",
+        "status.vm.ready"
+      ]
+    },
+    "StoragePlatform": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "storageplatforms",
+      "statusFields": [
+        "status.installed",
+        "status.observedVersion"
+      ]
+    },
+    "NetworkIntegration": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "networkintegrations",
+      "statusFields": [
+        "status.installed",
+        "status.observedVersion"
+      ]
+    }
+  }
+}
