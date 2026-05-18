@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/stuttgart-things/machinery/compare/v1.4.2...v1.5.0) (2026-05-18)
+
+
+### Features
+
+* add PR-preview CI workflows ([4005f21](https://github.com/stuttgart-things/machinery/commit/4005f21f3e1fdf853b8b15a1621baef092d7bb59))
+
 ## [1.4.2](https://github.com/stuttgart-things/machinery/compare/v1.4.1...v1.4.2) (2026-05-18)
 
 
