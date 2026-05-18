@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/stuttgart-things/machinery/compare/v1.4.1...v1.4.2) (2026-05-18)
+
+
+### Bug Fixes
+
+* **e2e:** extract port-forward into bash script for mvdan/sh compatibility ([b96e4f9](https://github.com/stuttgart-things/machinery/commit/b96e4f989d093ac63b402611678dafa93a7cf5f3))
+
 ## [1.4.1](https://github.com/stuttgart-things/machinery/compare/v1.4.0...v1.4.1) (2026-05-18)
 
 
