@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
 )
@@ -43,6 +44,12 @@ type resourceData struct {
 
 type resourceListData struct {
 	Resources []resourceData
+	// Namespaces is the sorted unique set of namespaces present in the
+	// current (kind-filtered) backend result, *before* the user's
+	// namespace filter is applied. The template emits it as JSON in a
+	// hidden data attribute so the namespace chip row stays a function
+	// of "what could match", not "what currently matches".
+	Namespaces []string
 }
 
 type detailData struct {
@@ -106,8 +113,25 @@ func (w *webServer) handleResources(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Namespace filter is applied web-side rather than in the gRPC
+	// handler: keeps GetResources protocol-stable for the gRPC client,
+	// and the kind-filtered list is already in memory.
+	nsFilter := parseCSV(r.URL.Query().Get("namespace"))
+
+	nsSet := map[string]struct{}{}
 	data := resourceListData{}
 	for _, res := range resp.Resources {
+		nsSet[res.Namespace] = struct{}{}
+		// Cluster-scoped resources (Namespace=="") are always shown,
+		// regardless of the namespace filter — there's no useful chip
+		// to toggle them on the UI side, and silently hiding them when
+		// any namespace is selected would surprise users mixing
+		// namespace-scoped and cluster-scoped kinds.
+		if len(nsFilter) > 0 && res.Namespace != "" {
+			if _, ok := nsFilter[res.Namespace]; !ok {
+				continue
+			}
+		}
 		data.Resources = append(data.Resources, resourceData{
 			Name:              res.Name,
 			Kind:              res.Kind,
@@ -118,12 +142,29 @@ func (w *webServer) handleResources(rw http.ResponseWriter, r *http.Request) {
 			InfoFields:        res.InfoFields,
 		})
 	}
+	for ns := range nsSet {
+		data.Namespaces = append(data.Namespaces, ns)
+	}
+	sort.Strings(data.Namespaces)
 
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := w.templates.ExecuteTemplate(rw, "resources.html", data); err != nil {
 		slog.Error("failed to render resources", "error", err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}
+}
+
+func parseCSV(v string) map[string]struct{} {
+	if v == "" {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out[p] = struct{}{}
+		}
+	}
+	return out
 }
 
 func (w *webServer) handleDetail(rw http.ResponseWriter, r *http.Request) {
