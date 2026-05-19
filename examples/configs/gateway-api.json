@@ -17,7 +17,7 @@
     },
     "ExternalSecret": {
       "group": "external-secrets.io",
-      "version": "v1beta1",
+      "version": "v1",
       "resource": "externalsecrets",
       "connectionField": "status.refreshTime",
       "statusFields": ["status.syncedResourceVersion"],

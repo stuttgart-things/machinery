@@ -9,10 +9,12 @@ import (
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 var testListKinds = map[schema.GroupVersionResource]string{
@@ -27,6 +29,91 @@ func newTestServer(objects ...runtime.Object) *server {
 	return &server{
 		dynamicClient: fakeClient,
 		config:        defaultConfig(),
+	}
+}
+
+// newTestServerWithMissingKind builds a server whose fake dynamic
+// client knows the given GVR (so it doesn't panic on a List call)
+// but a reactor intercepts that List and returns NotFound — the
+// same response shape the real API server uses when a CRD is gone
+// or a beta API version has been retired. The fake's "kind is
+// registered with customListKinds" check runs *before* reactors,
+// so the GVR has to be in the kind map for the reactor to even
+// get a chance.
+func newTestServerWithMissingKind(missing schema.GroupVersionResource, listKind string, objects ...runtime.Object) *server {
+	scheme := runtime.NewScheme()
+	kinds := map[schema.GroupVersionResource]string{}
+	for k, v := range testListKinds {
+		kinds[k] = v
+	}
+	kinds[missing] = listKind
+	fakeClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kinds, objects...)
+	fakeClient.PrependReactor("list", missing.Resource, func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: missing.Group, Resource: missing.Resource}, "")
+	})
+	return &server{dynamicClient: fakeClient, config: defaultConfig()}
+}
+
+func TestGetResources_SkipsKindsMissingFromCluster(t *testing.T) {
+	vm := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
+			"kind":       "HarvesterVM",
+			"metadata":   map[string]any{"name": "vm-still-here", "namespace": "default"},
+			"status": map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+				"vm":         map[string]any{"name": "vm-still-here"},
+			},
+		},
+	}
+	vm.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
+	})
+
+	// One healthy kind from defaultConfig, plus an additional kind
+	// the (simulated) cluster doesn't serve. With the resilience fix
+	// the call should succeed and just drop the broken kind.
+	missing := schema.GroupVersionResource{Group: "example.com", Version: "v1beta1", Resource: "gonefromclusters"}
+	s := newTestServerWithMissingKind(missing, "GoneFromClusterList", vm)
+	s.config.Resources["GoneFromCluster"] = ResourceKind{
+		Group: missing.Group, Version: missing.Version, Resource: missing.Resource,
+	}
+
+	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
+		Kind:  "*",
+		Count: -1,
+	})
+	if err != nil {
+		t.Fatalf("expected nil error (broken kind should be skipped), got %v", err)
+	}
+	if len(resp.Resources) != 1 || resp.Resources[0].Name != "vm-still-here" {
+		t.Fatalf("expected one resource from the healthy kind, got %+v", resp.Resources)
+	}
+	if resp.Resources[0].Kind != "HarvesterVM" {
+		t.Errorf("expected Kind=HarvesterVM, got %q", resp.Resources[0].Kind)
+	}
+}
+
+func TestGetResources_AllKindsMissingReturnsEmpty(t *testing.T) {
+	// Edge case: every configured kind is missing → no error, empty
+	// list. The dashboard shows the "No resources found" empty state
+	// instead of an HTTP 500. Failing loudly here would only make
+	// every fresh install with a stale config look broken.
+	missing := schema.GroupVersionResource{Group: "example.com", Version: "v1beta1", Resource: "onlygonekinds"}
+	s := newTestServerWithMissingKind(missing, "OnlyGoneKindList")
+	s.config.Resources = map[string]ResourceKind{
+		"OnlyGoneKind": {Group: missing.Group, Version: missing.Version, Resource: missing.Resource},
+	}
+
+	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
+		Kind:  "*",
+		Count: -1,
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(resp.Resources) != 0 {
+		t.Errorf("expected empty result, got %d resources", len(resp.Resources))
 	}
 }
 

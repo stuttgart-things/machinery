@@ -20,6 +20,8 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -164,6 +166,15 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 
 		resourceList, err := s.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
 		if err != nil {
+			// Skip kinds the API server no longer serves (CRD removed,
+			// API version retired, beta graduated to stable, …). One
+			// broken kind shouldn't blank the dashboard for kinds that
+			// do work — log loudly so operators can spot config drift.
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				slog.Warn("kind not available on cluster, skipping",
+					"kind", kind, "gvr", gvr.String(), "error", err)
+				continue
+			}
 			return nil, fmt.Errorf("error fetching resources for kind %s: %w", kind, err)
 		}
 
