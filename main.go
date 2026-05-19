@@ -212,25 +212,65 @@ func getResourceStatus(obj *unstructured.Unstructured) (string, bool) {
 	if err != nil {
 		return fmt.Sprintf("Error reading conditions: %v", err), false
 	}
-	if !found {
-		return "No conditions found", false
+	if found {
+		for _, c := range conditions {
+			condition, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			if condition["type"] == "Ready" {
+				if condition["status"] == "True" {
+					return "Ready", true
+				}
+				return "Not Ready", false
+			}
+		}
+		return "Not Ready", false
 	}
 
-	for _, c := range conditions {
-		condition, ok := c.(map[string]any)
+	// Gateway API kinds (HTTPRoute, GRPCRoute, …) scope conditions per
+	// parent at status.parents[*].conditions. There is no "Ready" type;
+	// per the spec readiness is Accepted=True + ResolvedRefs=True on
+	// every attached parent. Report Ready iff every condition is True,
+	// otherwise return the first non-True condition as the message.
+	parents, parentsFound, err := unstructured.NestedSlice(obj.Object, "status", "parents")
+	if err != nil {
+		return fmt.Sprintf("Error reading parents: %v", err), false
+	}
+	if !parentsFound {
+		return "No conditions found", false
+	}
+	var seen int
+	for _, p := range parents {
+		pm, ok := p.(map[string]any)
 		if !ok {
 			continue
 		}
-
-		if condition["type"] == "Ready" {
-			if condition["status"] == "True" {
-				return "Ready", true
+		pconds, ok2, err := unstructured.NestedSlice(pm, "conditions")
+		if err != nil || !ok2 {
+			continue
+		}
+		for _, c := range pconds {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
 			}
-			return "Not Ready", false
+			seen++
+			if cm["status"] != "True" {
+				t, _ := cm["type"].(string)
+				r, _ := cm["reason"].(string)
+				if r != "" {
+					return fmt.Sprintf("%s: %s", t, r), false
+				}
+				return t, false
+			}
 		}
 	}
-
-	return "Not Ready", false
+	if seen == 0 {
+		return "No conditions found", false
+	}
+	return "Ready", true
 }
 
 func getConnectionDetails(obj *unstructured.Unstructured, fieldPath string) string {
@@ -328,5 +368,37 @@ func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
 		return fmt.Sprintf("%d", intVal)
 	}
 
+	// Slice fallback. Gateway API surfaces useful fields as arrays:
+	// []string (e.g. HTTPRoute.spec.hostnames) and []map (e.g.
+	// HTTPRoute.spec.parentRefs). Render strings joined, maps as
+	// namespace/name pairs so the UI shows something usable.
+	slice, found, err := unstructured.NestedSlice(obj.Object, segments...)
+	if err == nil && found {
+		var parts []string
+		for _, item := range slice {
+			switch v := item.(type) {
+			case string:
+				parts = append(parts, v)
+			case map[string]any:
+				if s := summarizeRef(v); s != "" {
+					parts = append(parts, s)
+				}
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+
+	return ""
+}
+
+func summarizeRef(m map[string]any) string {
+	name, _ := m["name"].(string)
+	ns, _ := m["namespace"].(string)
+	if name != "" && ns != "" {
+		return fmt.Sprintf("%s/%s", ns, name)
+	}
+	if name != "" {
+		return name
+	}
 	return ""
 }
