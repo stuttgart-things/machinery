@@ -59,12 +59,7 @@ deployment = {
                             if config.configJson:
                                 {
                                     name: "MACHINERY_CONFIG"
-                                    valueFrom: {
-                                        configMapKeyRef: {
-                                            name: "{}-config".format(config.name)
-                                            key: "config.json"
-                                        }
-                                    }
+                                    value: "/etc/machinery/config.json"
                                 }
                         ]
                         envFrom: [
@@ -121,7 +116,13 @@ deployment = {
                                 mountPath: "/etc/kubeconfig"
                                 readOnly: True
                             }
-                        ] if config.kubeconfigSecret else [])
+                        ] if config.kubeconfigSecret else []) + ([
+                            {
+                                name: "config-file"
+                                mountPath: "/etc/machinery"
+                                readOnly: True
+                            }
+                        ] if config.configJson else [])
                     }
                 ]
                 securityContext: {
@@ -145,7 +146,14 @@ deployment = {
                             secretName: config.kubeconfigSecret
                         }
                     }
-                ] if config.kubeconfigSecret else [])
+                ] if config.kubeconfigSecret else []) + ([
+                    {
+                        name: "config-file"
+                        configMap: {
+                            name: "{}-config-file".format(config.name)
+                        }
+                    }
+                ] if config.configJson else [])
                 affinity: {
                     podAntiAffinity: {
                         preferredDuringSchedulingIgnoredDuringExecution: [
