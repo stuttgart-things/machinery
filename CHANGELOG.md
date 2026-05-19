@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/stuttgart-things/machinery/compare/v1.5.0...v1.5.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **kcl:** mount MACHINERY_CONFIG as a file instead of injecting contents ([29a8ca4](https://github.com/stuttgart-things/machinery/commit/29a8ca4179e8dcf261fb5b9cee7b249fcb3b1892)), closes [#52](https://github.com/stuttgart-things/machinery/issues/52)
+
 # [1.5.0](https://github.com/stuttgart-things/machinery/compare/v1.4.2...v1.5.0) (2026-05-18)
 
 
