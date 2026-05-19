@@ -78,7 +78,9 @@ Each resource kind supports:
 - **`statusFields`** — dot-separated paths displayed as status indicators
 - **`infoFields`** — labeled fields for the detail view, each with a `label` and `path`
 
-Field extraction supports string, bool, and int64 types automatically.
+Field extraction supports string, bool, and int64 scalars, plus slices: `[]string` joins comma-separated, `[]map` collapses to `namespace/name` pairs (useful for Gateway API's `spec.hostnames` and `spec.parentRefs`). For Gateway API kinds, readiness falls back from `status.conditions` to `status.parents[*].conditions[*]` automatically.
+
+See [`examples/configs/`](examples/configs/) for drop-in JSON files, including a Gateway API example.
 
 ```json
 {
