@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/stuttgart-things/machinery/compare/v1.6.0...v1.6.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **web:** drive filter request via htmx.ajax, not htmx.trigger ([23ac318](https://github.com/stuttgart-things/machinery/commit/23ac31844fef921193f071fa283b48083afeb4a7))
+
 # [1.6.0](https://github.com/stuttgart-things/machinery/compare/v1.5.5...v1.6.0) (2026-05-19)
 
 
