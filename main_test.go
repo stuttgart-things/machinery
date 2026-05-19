@@ -220,6 +220,55 @@ func TestGetResourceStatus(t *testing.T) {
 			wantMsg:   "Not Ready",
 			wantReady: false,
 		},
+		{
+			name: "gateway api parent conditions all true",
+			obj: map[string]any{
+				"metadata": map[string]any{"name": "test"},
+				"status": map[string]any{
+					"parents": []any{
+						map[string]any{
+							"conditions": []any{
+								map[string]any{"type": "Accepted", "status": "True"},
+								map[string]any{"type": "ResolvedRefs", "status": "True"},
+							},
+						},
+					},
+				},
+			},
+			wantMsg:   "Ready",
+			wantReady: true,
+		},
+		{
+			name: "gateway api parent condition not accepted",
+			obj: map[string]any{
+				"metadata": map[string]any{"name": "test"},
+				"status": map[string]any{
+					"parents": []any{
+						map[string]any{
+							"conditions": []any{
+								map[string]any{"type": "Accepted", "status": "False", "reason": "NoMatchingParent"},
+								map[string]any{"type": "ResolvedRefs", "status": "True"},
+							},
+						},
+					},
+				},
+			},
+			wantMsg:   "Accepted: NoMatchingParent",
+			wantReady: false,
+		},
+		{
+			name: "gateway api parent without conditions",
+			obj: map[string]any{
+				"metadata": map[string]any{"name": "test"},
+				"status": map[string]any{
+					"parents": []any{
+						map[string]any{"parentRef": map[string]any{"name": "gw"}},
+					},
+				},
+			},
+			wantMsg:   "No conditions found",
+			wantReady: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -301,10 +350,17 @@ func TestGetNestedField(t *testing.T) {
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{"name": "test"},
 		"status": map[string]any{
-			"name":    "my-resource",
-			"ready":   true,
-			"count":   int64(42),
-			"nested":  map[string]any{"deep": "value"},
+			"name":   "my-resource",
+			"ready":  true,
+			"count":  int64(42),
+			"nested": map[string]any{"deep": "value"},
+		},
+		"spec": map[string]any{
+			"hostnames": []any{"a.example.com", "b.example.com"},
+			"parentRefs": []any{
+				map[string]any{"name": "gateway-a", "namespace": "default"},
+				map[string]any{"name": "gateway-b"},
+			},
 		},
 	}}
 
@@ -318,6 +374,8 @@ func TestGetNestedField(t *testing.T) {
 		{"int64 field", "status.count", "42"},
 		{"nested field", "status.nested.deep", "value"},
 		{"missing field", "status.missing", ""},
+		{"slice of strings (hostnames)", "spec.hostnames", "a.example.com, b.example.com"},
+		{"slice of maps (parentRefs)", "spec.parentRefs", "default/gateway-a, gateway-b"},
 	}
 
 	for _, tt := range tests {
