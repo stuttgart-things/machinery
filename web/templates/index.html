@@ -308,12 +308,19 @@
 
         function refreshNow() {
             const list = document.getElementById('resource-list');
-            list.setAttribute('hx-get', buildURL());
-            // `filterChange` is one of the hx-trigger events on the
-            // list; firing it kicks off a fresh request. The element's
-            // hx-sync="this:abort" cancels any in-flight every-5s poll
-            // so a stale response can't overwrite the new one.
-            htmx.trigger(list, 'filterChange');
+            const url = buildURL();
+            // Keep hx-get in sync so the every-5s poller picks up the
+            // new URL on its next tick.
+            list.setAttribute('hx-get', url);
+            // Drive the request directly. `htmx.trigger(elt, 'event')`
+            // dispatches a CustomEvent but live tests on
+            // machinery-pr-67 showed it doesn't reliably re-fire the
+            // request when combined with `every 5s` polling on the
+            // same element — clicks updated the active class but the
+            // table stayed on the previous response. `htmx.ajax` is
+            // unambiguous and still respects hx-sync="this:abort", so
+            // a stale poll can't overwrite the fresh response either.
+            htmx.ajax('GET', url, '#resource-list');
         }
 
         function syncAllButton(rowId, set) {
