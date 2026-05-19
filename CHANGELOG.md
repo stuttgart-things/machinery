@@ -1,3 +1,10 @@
+## [1.5.5](https://github.com/stuttgart-things/machinery/compare/v1.5.4...v1.5.5) (2026-05-19)
+
+
+### Bug Fixes
+
+* tolerate per-kind 404s in GetResources, bump ExternalSecret example to v1 ([#66](https://github.com/stuttgart-things/machinery/issues/66)) ([56d9c28](https://github.com/stuttgart-things/machinery/commit/56d9c288ff2c5f30a87a01f0dc81f850fa621597))
+
 ## [1.5.4](https://github.com/stuttgart-things/machinery/compare/v1.5.3...v1.5.4) (2026-05-19)
 
 
