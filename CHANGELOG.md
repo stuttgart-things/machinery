@@ -1,3 +1,10 @@
+## [1.5.3](https://github.com/stuttgart-things/machinery/compare/v1.5.2...v1.5.3) (2026-05-19)
+
+
+### Bug Fixes
+
+* **ci:** publish PR image to GHCR with pr-<num>-<sha> tag ([73bb943](https://github.com/stuttgart-things/machinery/commit/73bb943cd9306b5126213ead8c3f3b972a685647))
+
 ## [1.5.2](https://github.com/stuttgart-things/machinery/compare/v1.5.1...v1.5.2) (2026-05-19)
 
 
