@@ -115,3 +115,36 @@ own once the PR drops out of the generator's result set.
 3. Apply the `preview` label.
 4. A PR comment with the live URL shows up shortly after Argo syncs.
 5. Close (or merge) the PR to tear everything down.
+
+## Troubleshooting
+
+If the preview URL responds `HTTP 500` from `server: envoy` with
+no inbound request lines on the pod, the HTTPRoute is the suspect
+rather than machinery itself. Check `ResolvedRefs`:
+
+```
+kubectl -n machinery-pr-<num> get httproute machinery -o yaml \
+  | yq '.status.parents[].conditions[] | select(.type=="ResolvedRefs")'
+```
+
+A `BackendNotFound` here with a stale `lastTransitionTime` means
+Cilium's gateway-controller latched the verdict before the backend
+Service made it into its informer cache. The
+`apps/machinery/httproute` chart in `stuttgart-things/argocd` ships
+a PostSync `Job` that re-annotates the HTTPRoute on every sync to
+force Cilium to re-reconcile — if that Job ran successfully, the
+race is already self-healed. Set
+`httpRoute.nudgeAfterSync: false` on the install chart's values to
+opt out of the Job (sensible only for long-lived deployments where
+the gateway-controller's cache is steady-state).
+
+If the dashboard renders but the resource table stays empty for
+**every** kind, `kubectl logs deploy/machinery` will usually show
+the cause directly — typically `the server could not find the
+requested resource` against a CRD that's been removed or an API
+version that has been retired (e.g. ESO `v1beta1` → `v1`).
+`GetResources` skips any kind that 404s and continues with the
+others, so a single broken kind only loses its own rows. RBAC
+gaps surface the same way but as `forbidden`; the
+`apps/machinery/install` chart's `rbac.rules` block controls the
+ClusterRole the machinery SA gets.
