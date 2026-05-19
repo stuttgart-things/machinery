@@ -16,6 +16,12 @@ concurrency:
 jobs:
   e2e:
     name: e2e (kind + machinery + test CRDs)
+    # PRs labelled `preview` get a real-cluster deployment on homerun2-dev
+    # via the AppSet in stuttgart-things/argocd@platforms/machinery-pr-preview,
+    # which exercises the same code paths against a richer environment.
+    # Running kind on top of that doubles the runner cost (and the wait)
+    # without adding much signal — skip.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'preview')
     # Dedicated kind-only runners (kind-testing-runner-1 / -2). The
     # concurrency group above keeps only one job running at a time; the
     # second runner is hot spare or room for a sibling project. Same pattern

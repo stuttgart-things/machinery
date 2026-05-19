@@ -1,0 +1,55 @@
+{
+  "port": 50051,
+  "httpPort": 8080,
+  "resources": {
+    "StoragePlatform": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "storageplatforms",
+      "statusFields": [
+        "status.installed",
+        "status.observedVersion"
+      ],
+      "infoFields": [
+        { "label": "Provider", "path": "spec.provider" },
+        { "label": "Version",  "path": "spec.version" }
+      ]
+    },
+    "NetworkIntegration": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "networkintegrations",
+      "statusFields": [
+        "status.installed",
+        "status.observedVersion"
+      ],
+      "infoFields": [
+        { "label": "Provider", "path": "spec.provider" },
+        { "label": "Version",  "path": "spec.version" }
+      ]
+    },
+    "SecurityPlatform": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "securityplatforms",
+      "statusFields": [
+        "status.installed",
+        "status.observedVersion"
+      ]
+    },
+    "AnsibleRun": {
+      "group": "resources.stuttgart-things.com",
+      "version": "v1alpha1",
+      "resource": "ansibleruns",
+      "connectionField": "status.lastRunTime",
+      "statusFields": [
+        "status.phase",
+        "status.observedGeneration"
+      ],
+      "infoFields": [
+        { "label": "Playbook", "path": "spec.playbook" },
+        { "label": "Inventory","path": "spec.inventory" }
+      ]
+    }
+  }
+}
