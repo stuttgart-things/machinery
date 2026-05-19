@@ -56,8 +56,23 @@
         .filters {
             display: flex;
             gap: 0.5rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0.75rem;
             flex-wrap: wrap;
+            align-items: center;
+        }
+        .filters:last-of-type { margin-bottom: 1.5rem; }
+        .filter-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-right: 0.25rem;
+            min-width: 5rem;
+        }
+        .filter-empty {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-style: italic;
         }
         .filter-btn {
             padding: 0.4rem 1rem;
@@ -247,24 +262,24 @@
             </div>
         </header>
 
-        <div class="filters">
-            <button class="filter-btn active"
-                    hx-get="/resources?kind=*"
-                    hx-target="#resource-list"
-                    hx-indicator="#spinner"
-                    onclick="setActive(this)">All</button>
+        <div class="filters" id="kind-filters">
+            <span class="filter-label">Kind</span>
+            <button class="filter-btn kind-filter active" data-value="*">All</button>
             {{range .Kinds}}
-            <button class="filter-btn"
-                    hx-get="/resources?kind={{.}}"
-                    hx-target="#resource-list"
-                    hx-indicator="#spinner"
-                    onclick="setActive(this)">{{.}}</button>
+            <button class="filter-btn kind-filter" data-value="{{.}}">{{.}}</button>
             {{end}}
+        </div>
+
+        <div class="filters" id="namespace-filters">
+            <span class="filter-label">Namespace</span>
+            <button class="filter-btn ns-filter active" data-value="*">All</button>
+            <span class="filter-empty" id="ns-empty">no namespaces yet — refreshing</span>
         </div>
 
         <div id="resource-list"
              hx-get="/resources?kind=*"
-             hx-trigger="load, every 5s"
+             hx-trigger="load, every 5s, filterChange"
+             hx-sync="this:abort"
              hx-indicator="#spinner">
         </div>
 
@@ -277,14 +292,103 @@
     </div>
 
     <script>
-        function setActive(btn) {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            // Update the auto-refresh URL
+        // Filter state owned by the page, not the server. Each chip
+        // toggles membership in the relevant set; an empty set means
+        // "no filter" → server returns everything for that axis.
+        const state = { kinds: new Set(), namespaces: new Set() };
+
+        function buildURL() {
+            const p = new URLSearchParams();
+            p.set('kind', state.kinds.size ? [...state.kinds].join(',') : '*');
+            if (state.namespaces.size) {
+                p.set('namespace', [...state.namespaces].join(','));
+            }
+            return '/resources?' + p.toString();
+        }
+
+        function refreshNow() {
             const list = document.getElementById('resource-list');
-            const url = btn.getAttribute('hx-get');
-            list.setAttribute('hx-get', url);
-            htmx.process(list);
+            list.setAttribute('hx-get', buildURL());
+            // `filterChange` is one of the hx-trigger events on the
+            // list; firing it kicks off a fresh request. The element's
+            // hx-sync="this:abort" cancels any in-flight every-5s poll
+            // so a stale response can't overwrite the new one.
+            htmx.trigger(list, 'filterChange');
+        }
+
+        function syncAllButton(rowId, set) {
+            const allBtn = document.querySelector(`#${rowId} [data-value="*"]`);
+            if (!allBtn) return;
+            if (set.size === 0) allBtn.classList.add('active');
+            else allBtn.classList.remove('active');
+        }
+
+        // Single delegated handler for both filter rows.
+        document.addEventListener('click', e => {
+            const btn = e.target.closest('.filter-btn');
+            if (!btn) return;
+            const rowId = btn.closest('.filters')?.id;
+            if (rowId !== 'kind-filters' && rowId !== 'namespace-filters') return;
+            const set = rowId === 'kind-filters' ? state.kinds : state.namespaces;
+            const value = btn.dataset.value;
+            if (value === '*') {
+                set.clear();
+                btn.parentElement.querySelectorAll('.filter-btn')
+                    .forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            } else {
+                if (set.has(value)) {
+                    set.delete(value);
+                    btn.classList.remove('active');
+                } else {
+                    set.add(value);
+                    btn.classList.add('active');
+                }
+                syncAllButton(rowId, set);
+            }
+            refreshNow();
+        });
+
+        // Namespace chips are dynamic — re-derived from each /resources
+        // response. The chip row in the markup is a placeholder; this
+        // re-renders it on every swap, preserving the user's selection.
+        document.body.addEventListener('htmx:afterSwap', e => {
+            if (e.target.id !== 'resource-list') return;
+            const data = e.target.querySelector('#ns-data');
+            if (!data) return;
+            let namespaces;
+            try { namespaces = JSON.parse(data.dataset.namespaces); }
+            catch { namespaces = []; }
+            renderNamespaceChips(namespaces);
+        });
+
+        function renderNamespaceChips(namespaces) {
+            const row = document.getElementById('namespace-filters');
+            const html = ['<span class="filter-label">Namespace</span>'];
+            html.push(
+                `<button class="filter-btn ns-filter ${state.namespaces.size === 0 ? 'active' : ''}" data-value="*">All</button>`
+            );
+            // Cluster-scoped resources have namespace=""; the server
+            // emits them in the metadata array but they're not
+            // filterable here — there's no useful chip label for them
+            // and the namespace filter always lets them through (see
+            // handleResources). UI-side we just skip the empty entry.
+            const filterable = namespaces.filter(ns => ns !== '');
+            if (filterable.length === 0) {
+                html.push('<span class="filter-empty">no namespaced resources to filter</span>');
+            } else {
+                for (const ns of filterable) {
+                    const active = state.namespaces.has(ns) ? 'active' : '';
+                    html.push(`<button class="filter-btn ns-filter ${active}" data-value="${ns}">${ns}</button>`);
+                }
+            }
+            // Drop any selected namespaces that no longer exist in the
+            // new result set — keeps the URL clean and avoids zombie
+            // filters that would silently empty the table.
+            for (const ns of [...state.namespaces]) {
+                if (!namespaces.includes(ns)) state.namespaces.delete(ns);
+            }
+            row.innerHTML = html.join('');
         }
     </script>
 </body>

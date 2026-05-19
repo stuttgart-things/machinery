@@ -1,3 +1,8 @@
+{{/* Hidden data carrier — the kind-filtered namespace set as a
+JSON array. JS in index.html reads `data-namespaces` and rebuilds
+the namespace chip row, preserving the user's current selection. */}}
+<div id="ns-data" data-namespaces='[{{range $i, $ns := .Namespaces}}{{if $i}},{{end}}"{{$ns}}"{{end}}]' style="display:none"></div>
+
 {{if .Resources}}
 <div class="count">{{len .Resources}} resource{{if ne (len .Resources) 1}}s{{end}} found</div>
 <table class="resource-table">

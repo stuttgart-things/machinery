@@ -21,8 +21,8 @@ Client (gRPC)  ──> gRPC :50051 ─┘        (dynamic client)
 
 HTMX-based dashboard at `http://localhost:8080`:
 
-- Auto-refreshing resource table (5s interval)
-- Filter by resource kind
+- Auto-refreshing resource table (5s interval, stale-response guarded)
+- Multi-select filters by resource kind and namespace
 - Clickable rows for detail view with info fields
 - Ready/Not Ready status badges
 - Build info footer (version, commit, date)
