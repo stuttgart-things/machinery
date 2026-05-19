@@ -10,6 +10,7 @@ the dashboard.
 | [`default.json`](default.json) | `HarvesterVM`, `StoragePlatform`, `NetworkIntegration` | starter — same as the binary's built-in `defaultConfig()` |
 | [`vsphere-vms.json`](vsphere-vms.json) | `VsphereVM`, `HarvesterVM` | VM-provisioning view; includes `infoFields` for the detail pane |
 | [`platforms.json`](platforms.json) | `StoragePlatform`, `NetworkIntegration`, `SecurityPlatform`, `AnsibleRun` | platform/automation rollout view across XRs |
+| [`gateway-api.json`](gateway-api.json) | cert-manager `Certificate`, ESO `ExternalSecret`, Gateway API `HTTPRoute` | platform-services view; exercises the Gateway API per-parent status path and slice-valued info fields |
 
 ## Schema (per kind)
 
@@ -26,8 +27,24 @@ the dashboard.
 }
 ```
 
-Dot-paths support `string`, `bool`, and `int64` values automatically.
-Missing paths render as empty.
+Dot-paths support `string`, `bool`, and `int64` scalars, plus slices:
+`[]string` joins comma-separated (e.g. `spec.hostnames`), `[]map`
+collapses to `namespace/name` pairs when the items carry those keys
+(e.g. `spec.parentRefs`). Missing paths render as empty. Array
+indexing (`spec.parentRefs[0].name`) is not supported — point at the
+parent path and let the renderer flatten it.
+
+## Readiness
+
+The dashboard's `Ready` badge comes from `status.conditions[*]` —
+specifically the `type: Ready` entry (standard kubernetes /
+crossplane convention). For Gateway API kinds (`HTTPRoute`,
+`GRPCRoute`, …) there is no `Ready` type; conditions live per parent
+at `status.parents[*].conditions[*]` instead. machinery falls back to
+that path automatically and reports Ready when every parent condition
+is `True`, otherwise surfaces the first non-`True` condition as
+`<Type>: <Reason>`. No config knob — the fallback engages whenever
+flat `status.conditions` is absent.
 
 ## Deploying a config
 
