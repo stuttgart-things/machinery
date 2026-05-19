@@ -6,12 +6,17 @@
 name: Comment Preview URL on PR
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, labeled]
     branches:
       - main
 
 jobs:
   comment:
+    # opened/reopened always post the URL; labeled only posts when the
+    # `preview` label is the one that was just added — that's the label
+    # the preview AppSet actually keys on, and it lets us post the URL
+    # for PRs that were opened without the label and labelled later.
+    if: github.event.action != 'labeled' || github.event.label.name == 'preview'
     uses: stuttgart-things/github-workflow-templates/.github/workflows/call-comment-preview-url.yaml@main
     with:
       hostname-prefix: machinery-pr
