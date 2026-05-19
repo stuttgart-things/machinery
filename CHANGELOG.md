@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/stuttgart-things/machinery/compare/v1.5.5...v1.6.0) (2026-05-19)
+
+
+### Features
+
+* **web:** multi-select kind+namespace filters, fix stale-poll race ([#65](https://github.com/stuttgart-things/machinery/issues/65)) ([b1d7f0b](https://github.com/stuttgart-things/machinery/commit/b1d7f0befd5476f33dc49db57f551d6957a68b09))
+
 ## [1.5.5](https://github.com/stuttgart-things/machinery/compare/v1.5.4...v1.5.5) (2026-05-19)
 
 
