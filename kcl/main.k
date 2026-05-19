@@ -15,7 +15,8 @@ manifests = [
     m for m in [
         namespace.namespace
         serviceaccount.serviceAccount
-        configmap.configMap
+        configmap.envConfigMap
+        configmap.fileConfigMap
         deploy.deployment
         service.service
         httproute.httproute
