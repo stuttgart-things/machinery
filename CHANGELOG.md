@@ -1,3 +1,10 @@
+## [1.5.4](https://github.com/stuttgart-things/machinery/compare/v1.5.3...v1.5.4) (2026-05-19)
+
+
+### Bug Fixes
+
+* surface Gateway API status + render slice info fields ([#63](https://github.com/stuttgart-things/machinery/issues/63)) ([65bc7c6](https://github.com/stuttgart-things/machinery/commit/65bc7c6801f0737c3101c39aecee09dc4ac8757a))
+
 ## [1.5.3](https://github.com/stuttgart-things/machinery/compare/v1.5.2...v1.5.3) (2026-05-19)
 
 
