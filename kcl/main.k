@@ -9,6 +9,7 @@ import configmap
 import deploy
 import service
 import httproute
+import grpcroute
 
 # Export all manifests (filter out None values)
 manifests = [
@@ -20,5 +21,6 @@ manifests = [
         deploy.deployment
         service.service
         httproute.httproute
+        grpcroute.grpcroute
     ] if m
 ]

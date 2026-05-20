@@ -17,6 +17,11 @@ _httpRouteParentRefName = option("config.httpRouteParentRefName")
 _httpRouteParentRefNamespace = option("config.httpRouteParentRefNamespace")
 _httpRouteHostname = option("config.httpRouteHostname")
 _httpRouteAnnotations = option("config.httpRouteAnnotations") or {}
+_grpcRouteEnabled = option("config.grpcRouteEnabled")
+_grpcRouteParentRefName = option("config.grpcRouteParentRefName")
+_grpcRouteParentRefNamespace = option("config.grpcRouteParentRefNamespace")
+_grpcRouteHostname = option("config.grpcRouteHostname")
+_grpcRouteAnnotations = option("config.grpcRouteAnnotations") or {}
 _extraEnvVars = option("config.extraEnvVars") or {}
 
 # Config instance with command-line overrides
@@ -45,6 +50,16 @@ config: schema.Machinery = schema.Machinery {
         httpRouteHostname = _httpRouteHostname
     if _httpRouteAnnotations:
         httpRouteAnnotations = _httpRouteAnnotations
+    if _grpcRouteEnabled:
+        grpcRouteEnabled = _grpcRouteEnabled in [True, "True", "true"]
+    if _grpcRouteParentRefName:
+        grpcRouteParentRefName = _grpcRouteParentRefName
+    if _grpcRouteParentRefNamespace:
+        grpcRouteParentRefNamespace = _grpcRouteParentRefNamespace
+    if _grpcRouteHostname:
+        grpcRouteHostname = _grpcRouteHostname
+    if _grpcRouteAnnotations:
+        grpcRouteAnnotations = _grpcRouteAnnotations
     if _extraEnvVars:
         extraEnvVars = _extraEnvVars
 }
