@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/stuttgart-things/machinery/compare/v1.9.0...v1.10.0) (2026-05-20)
+
+
+### Features
+
+* **examples:** gRPC consumer CLI for GRPCRoute access patterns ([#57](https://github.com/stuttgart-things/machinery/issues/57)) ([1187940](https://github.com/stuttgart-things/machinery/commit/118794031c773987b4691290340b261f56ca1573)), closes [stuttgart-things/argocd#184](https://github.com/stuttgart-things/argocd/issues/184)
+
 # [1.9.0](https://github.com/stuttgart-things/machinery/compare/v1.8.0...v1.9.0) (2026-05-20)
 
 
