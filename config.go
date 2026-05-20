@@ -23,9 +23,22 @@ type ResourceKind struct {
 }
 
 type Config struct {
-	Port     int                     `json:"port"`
-	HttpPort int                     `json:"httpPort"`
+	Port      int                     `json:"port"`
+	HttpPort  int                     `json:"httpPort"`
 	Resources map[string]ResourceKind `json:"resources"`
+	Auth      AuthConfig              `json:"auth,omitempty"`
+}
+
+// AuthConfig gates the gRPC server on a bearer token. In-process callers
+// (web.go) bypass it by construction — interceptors only fire on the
+// network path. Token resolution order at startup: Token → TokenFile →
+// $TokenEnvVar → $MACHINERY_AUTH_TOKEN. With Enabled true and no token
+// resolved, startup fails fast rather than running wide-open.
+type AuthConfig struct {
+	Enabled     bool   `json:"enabled,omitempty"`
+	Token       string `json:"token,omitempty"`       // inline; test/dev only
+	TokenFile   string `json:"tokenFile,omitempty"`   // path; mounted from Secret in prod
+	TokenEnvVar string `json:"tokenEnvVar,omitempty"` // env var name; defaults to MACHINERY_AUTH_TOKEN
 }
 
 func loadConfig(path string) (*Config, error) {

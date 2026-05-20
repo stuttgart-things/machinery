@@ -81,7 +81,22 @@ func main() {
 
 	srv := &server{dynamicClient: dynamicClient, config: cfg}
 
-	s := grpc.NewServer()
+	var grpcOpts []grpc.ServerOption
+	if cfg.Auth.Enabled {
+		token, err := resolveAuthToken(cfg.Auth)
+		if err != nil {
+			slog.Error("failed to resolve auth token", "error", err)
+			os.Exit(1)
+		}
+		if token == "" {
+			slog.Error("auth enabled but no token resolved", "tokenFile", cfg.Auth.TokenFile, "tokenEnvVar", cfg.Auth.TokenEnvVar)
+			os.Exit(1)
+		}
+		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(newAuthInterceptor(token)))
+		slog.Info("gRPC auth enabled (bearer token)")
+	}
+
+	s := grpc.NewServer(grpcOpts...)
 	resourceservice.RegisterResourceServiceServer(s, srv)
 
 	healthServer := health.NewServer()
