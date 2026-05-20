@@ -37,6 +37,13 @@ schema Machinery:
     httpRouteHostname: str = ""
     httpRouteAnnotations: {str:str} = {}
 
+    # GRPCRoute (Gateway API)
+    grpcRouteEnabled: bool = False
+    grpcRouteParentRefName: str = ""
+    grpcRouteParentRefNamespace: str = ""
+    grpcRouteHostname: str = ""
+    grpcRouteAnnotations: {str:str} = {}
+
     # Kubeconfig
     kubeconfigSecret: str = ""
 
