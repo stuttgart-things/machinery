@@ -82,14 +82,12 @@ The proto is small enough that the no-code path is fast. Same gateway
 address, same token, ad-hoc requests:
 
 Machinery does **not** register the gRPC reflection service, so
-`grpcurl` needs the proto file to know the message shapes. Point it at
-the one in this repo (or a checkout of it):
+`grpcurl` needs an explicit `-proto` for every call. Point it at the
+proto in this repo (or a checkout of it):
 
 ```bash
-PROTO=$(git rev-parse --show-toplevel)/resourceservice/resource_service.proto
-
-# Health check — does the route reach a pod at all? (no proto needed)
-grpcurl machinery.example.com:443 grpc.health.v1.Health/Check
+REPO=$(git rev-parse --show-toplevel)
+PROTO=$REPO/resourceservice/resource_service.proto
 
 # List five VsphereVMAnsible resources.
 grpcurl \
@@ -108,9 +106,20 @@ grpcurl \
   resourceservice.ResourceService/GetResourceDetail
 ```
 
-The `grpc.health.v1.Health` service is registered without a `-proto`
-because `grpcurl` ships the health proto built in. Add `-plaintext` if
-you're hitting an in-cluster port-forward instead of the gateway.
+For the health check, `consumer health` is the easiest path — it has
+the health proto compiled in. If you'd rather stay in `grpcurl`, you
+need to feed it a copy of the upstream health proto (machinery
+doesn't expose reflection):
+
+```bash
+curl -fsSL -o /tmp/health.proto \
+  https://raw.githubusercontent.com/grpc/grpc-proto/master/grpc/health/v1/health.proto
+grpcurl -proto /tmp/health.proto \
+  machinery.example.com:443 grpc.health.v1.Health/Check
+```
+
+Add `-plaintext` if you're hitting an in-cluster port-forward rather
+than the gateway.
 
 ## JSON output
 
