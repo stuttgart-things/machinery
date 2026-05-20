@@ -15,15 +15,23 @@ import (
 )
 
 var (
-	secureConnection  = os.Getenv("SECURE_CONNECTION")  // "true" or "false"
-	clusterBookServer = os.Getenv("CLUSTERBOOK_SERVER") // localhost:50051
-	tlsCACertPath     = os.Getenv("TLS_CA_CERT")        // optional: path to CA cert for verification
-	tlsSkipVerify     = os.Getenv("TLS_SKIP_VERIFY")    // "true" only for development
+	secureConnection  = os.Getenv("SECURE_CONNECTION")    // "true" or "false"
+	clusterBookServer = os.Getenv("CLUSTERBOOK_SERVER")   // localhost:50051
+	tlsCACertPath     = os.Getenv("TLS_CA_CERT")          // optional: path to CA cert for verification
+	tlsSkipVerify     = os.Getenv("TLS_SKIP_VERIFY")      // "true" only for development
+	authToken         = os.Getenv("MACHINERY_AUTH_TOKEN") // optional: bearer token; attached as `authorization: Bearer <token>` when set
 )
 
 func main() {
-	// Connect to the gRPC server
-	conn, err := grpc.NewClient(clusterBookServer, getCredentials())
+	dialOpts := []grpc.DialOption{getCredentials()}
+	if authToken != "" {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(bearerToken{
+			token:    authToken,
+			insecure: secureConnection != "true",
+		}))
+	}
+
+	conn, err := grpc.NewClient(clusterBookServer, dialOpts...)
 	if err != nil {
 		log.Fatalf("Failed to connect to gRPC server: %v", err)
 	}
@@ -46,6 +54,23 @@ func main() {
 	for _, resource := range resp.Resources {
 		fmt.Printf("Name: %s, Kind: %s, Ready: %t, Status: %s, ConnectionDetails: %s\n", resource.Name, resource.Kind, resource.Ready, resource.StatusMessage, resource.ConnectionDetails)
 	}
+}
+
+// bearerToken implements grpc.PerRPCCredentials, attaching
+// `authorization: Bearer <token>` to every outgoing RPC. RequireTransportSecurity
+// is reported per-instance so the same struct works on TLS and plaintext dial
+// paths — flip insecure=true to allow sending the token without TLS (LAN/dev).
+type bearerToken struct {
+	token    string
+	insecure bool
+}
+
+func (b bearerToken) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + b.token}, nil
+}
+
+func (b bearerToken) RequireTransportSecurity() bool {
+	return !b.insecure
 }
 
 func getCredentials() grpc.DialOption {

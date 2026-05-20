@@ -68,6 +68,32 @@ Resource types are configurable via JSON. Set `MACHINERY_CONFIG` to load a custo
 |----------|-------------|---------|
 | `KUBECONFIG` | Path to kubeconfig file | in-cluster config |
 | `MACHINERY_CONFIG` | Path to JSON config file | built-in defaults |
+| `MACHINERY_AUTH_TOKEN` | Bearer token for the gRPC `auth` gate (see below); also picked up by `client/client.go` | unset |
+
+### gRPC auth (opt-in)
+
+The gRPC `ResourceService` runs anonymous by default — appropriate for in-cluster usage where access is gated at the network/Gateway layer. To require a bearer token on every network-side RPC, set:
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "tokenFile": "/etc/machinery/auth-token"
+  }
+}
+```
+
+Token resolution order: `auth.token` (inline) → `auth.tokenFile` → `$auth.tokenEnvVar` → `$MACHINERY_AUTH_TOKEN`. Startup fails fast if `enabled: true` but no token resolves. `/grpc.health.v1.Health/*` stays anonymous so liveness/readiness probes keep working. In-process calls from the HTMX frontend (`web.go`) bypass the interceptor by construction. Pair this with the GRPCRoute (see [`kcl/README.md`](kcl/README.md)) when exposing the service beyond the pod network.
+
+Caller side:
+
+```bash
+grpcurl -H 'authorization: Bearer <token>' \
+  -authority machinery-grpc.example.com \
+  machinery-grpc.example.com:443 resourceservice.ResourceService/GetResources
+```
+
+or via `client/client.go`: `MACHINERY_AUTH_TOKEN=<token> go run client/client.go`.
 
 ### Config File
 
