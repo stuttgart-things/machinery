@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/stuttgart-things/machinery/compare/v1.7.0...v1.8.0) (2026-05-20)
+
+
+### Features
+
+* **auth:** bearer-token gRPC interceptor ([#56](https://github.com/stuttgart-things/machinery/issues/56)) ([#69](https://github.com/stuttgart-things/machinery/issues/69)) ([ae03bcc](https://github.com/stuttgart-things/machinery/commit/ae03bcc73477c5cd67002ccc820a14825de916c3))
+
 # [1.7.0](https://github.com/stuttgart-things/machinery/compare/v1.6.1...v1.7.0) (2026-05-20)
 
 
