@@ -83,3 +83,68 @@ CLUSTERBOOK_SERVER=machinery-grpc.example.com:80 SECURE_CONNECTION=false \
 
 > Scoped to local-network access; no TLS or auth is added here — track those
 > separately.
+
+## gRPC auth (Secret-mounted bearer token)
+
+When exposing the gRPC service beyond the pod network, gate it with the bearer-token
+interceptor (machinery's `Config.Auth`). The KCL base mounts an externally-managed
+`Secret` containing the token; the user's `MACHINERY_CONFIG` (passed via `configJson`)
+then references the mounted file via `auth.tokenFile`.
+
+The Secret itself is materialized out-of-band — by ESO, Kyverno generate, a sealed
+secret, or plain `kubectl create secret generic`. The KCL base only mounts it.
+
+```bash
+# 1. Create the Secret out-of-band (any mechanism that lands a key called `token`):
+kubectl -n machinery create secret generic machinery-auth-token \
+  --from-literal=token="$(openssl rand -hex 32)"
+```
+
+```yaml
+# 2. Reference it in your KCL profile. Defaults are sensible — only the Secret
+#    name is required; the field defaults to mounting key `token` at
+#    `/var/run/machinery-auth/token` (deliberately under /var/run so it can't
+#    collide with the /etc/machinery configJson mount).
+kcl_options:
+  - key: config.authTokenSecret
+    value: machinery-auth-token
+  # optional overrides:
+  # - key: config.authTokenSecretKey
+  #   value: token
+  # - key: config.authTokenMountPath
+  #   value: /var/run/machinery-auth/token
+
+  # 3. Enable auth in MACHINERY_CONFIG and point tokenFile at the mount path:
+  - key: config.configJson
+    value: |
+      {
+        "port": 50051,
+        "auth": {
+          "enabled": true,
+          "tokenFile": "/var/run/machinery-auth/token"
+        },
+        "resources": { ... }
+      }
+```
+
+Verify from outside the cluster (through the `GRPCRoute` from the previous section):
+
+```bash
+TOKEN=$(kubectl -n machinery get secret machinery-auth-token -o jsonpath='{.data.token}' | base64 -d)
+
+# Without the token → Unauthenticated
+grpcurl -authority machinery-grpc.example.com \
+  machinery-grpc.example.com:443 \
+  resourceservice.ResourceService/GetResources
+# ERROR: Code: Unauthenticated, Message: missing authorization header
+
+# With the token → success
+grpcurl -H "authorization: Bearer ${TOKEN}" \
+  -authority machinery-grpc.example.com \
+  machinery-grpc.example.com:443 \
+  resourceservice.ResourceService/GetResources
+```
+
+The HTMX dashboard is unaffected — its calls are in-process and bypass the
+interceptor. `/grpc.health.v1.Health/*` also stays anonymous, so liveness/readiness
+probes keep working without the token.

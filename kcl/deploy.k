@@ -122,7 +122,14 @@ deployment = {
                                 mountPath: "/etc/machinery"
                                 readOnly: True
                             }
-                        ] if config.configJson else [])
+                        ] if config.configJson else []) + ([
+                            {
+                                name: "auth-token"
+                                mountPath: config.authTokenMountPath
+                                subPath: "token"
+                                readOnly: True
+                            }
+                        ] if config.authTokenSecret else [])
                     }
                 ]
                 securityContext: {
@@ -153,7 +160,20 @@ deployment = {
                             name: "{}-config-file".format(config.name)
                         }
                     }
-                ] if config.configJson else [])
+                ] if config.configJson else []) + ([
+                    {
+                        name: "auth-token"
+                        secret: {
+                            secretName: config.authTokenSecret
+                            items: [
+                                {
+                                    key: config.authTokenSecretKey
+                                    path: "token"
+                                }
+                            ]
+                        }
+                    }
+                ] if config.authTokenSecret else [])
                 affinity: {
                     podAntiAffinity: {
                         preferredDuringSchedulingIgnoredDuringExecution: [
