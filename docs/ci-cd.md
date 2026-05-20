@@ -138,6 +138,16 @@ race is already self-healed. Set
 opt out of the Job (sensible only for long-lived deployments where
 the gateway-controller's cache is steady-state).
 
+Preview envs also expose the gRPC service through the same gateway
+via a sibling `GRPCRoute` (`machinery-pr-<num>-grpc.…`), driven by
+the `apps/machinery/grpcroute` sub-chart in `stuttgart-things/argocd`.
+The Cilium race above hits `GRPCRoute`s identically (same controller,
+same informer-cache ordering), so the sub-chart ships an analogous
+PostSync nudge — same `nudgeAfterSync` opt-out under the `grpcRoute:`
+values block. Verify the route the same way (swap `httproute` →
+`grpcroute` in the kubectl call) and call it with `grpcurl` against
+the gRPC hostname on port 443 (TLS terminates at the gateway).
+
 If the dashboard renders but the resource table stays empty for
 **every** kind, `kubectl logs deploy/machinery` will usually show
 the cause directly — typically `the server could not find the

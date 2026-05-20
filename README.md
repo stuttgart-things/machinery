@@ -117,7 +117,7 @@ kcl run kcl/main.k -Y tests/kcl-deploy-profile.yaml
 kcl run kcl/main.k -Y tests/kcl-deploy-profile.yaml | kubectl apply -f -
 ```
 
-Features: gRPC/HTTP health probes, hardened security context (non-root, read-only rootfs, drop all capabilities), pod anti-affinity, optional kubeconfig secret mount, Gateway API HTTPRoute.
+Features: gRPC/HTTP health probes, hardened security context (non-root, read-only rootfs, drop all capabilities), pod anti-affinity, optional kubeconfig secret mount, Gateway API HTTPRoute and GRPCRoute (opt-in, see [`kcl/README.md`](kcl/README.md) for the gRPC-via-gateway profile).
 
 See [`kcl/README.md`](kcl/README.md) for all configuration options and manifest structure.
 
