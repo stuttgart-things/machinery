@@ -22,6 +22,9 @@ _grpcRouteParentRefName = option("config.grpcRouteParentRefName")
 _grpcRouteParentRefNamespace = option("config.grpcRouteParentRefNamespace")
 _grpcRouteHostname = option("config.grpcRouteHostname")
 _grpcRouteAnnotations = option("config.grpcRouteAnnotations") or {}
+_authTokenSecret = option("config.authTokenSecret")
+_authTokenSecretKey = option("config.authTokenSecretKey")
+_authTokenMountPath = option("config.authTokenMountPath")
 _extraEnvVars = option("config.extraEnvVars") or {}
 
 # Config instance with command-line overrides
@@ -60,6 +63,12 @@ config: schema.Machinery = schema.Machinery {
         grpcRouteHostname = _grpcRouteHostname
     if _grpcRouteAnnotations:
         grpcRouteAnnotations = _grpcRouteAnnotations
+    if _authTokenSecret:
+        authTokenSecret = _authTokenSecret
+    if _authTokenSecretKey:
+        authTokenSecretKey = _authTokenSecretKey
+    if _authTokenMountPath:
+        authTokenMountPath = _authTokenMountPath
     if _extraEnvVars:
         extraEnvVars = _extraEnvVars
 }

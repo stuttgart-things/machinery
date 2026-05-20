@@ -47,6 +47,17 @@ schema Machinery:
     # Kubeconfig
     kubeconfigSecret: str = ""
 
+    # gRPC auth — mount a Secret carrying the bearer token machinery
+    # checks via its Config.Auth.tokenFile path. The Secret itself is
+    # materialized externally (ESO / Kyverno / kubectl create secret);
+    # this block only wires it into the Pod. Leave authTokenSecret
+    # empty to skip the mount entirely (default behavior unchanged).
+    # The user's MACHINERY_CONFIG / configJson is responsible for
+    # setting auth.enabled: true and auth.tokenFile to authTokenMountPath.
+    authTokenSecret: str = ""
+    authTokenSecretKey: str = "token"
+    authTokenMountPath: str = "/var/run/machinery-auth/token"
+
     # Config file
     configJson: str = ""
 
