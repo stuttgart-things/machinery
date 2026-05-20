@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/stuttgart-things/machinery/compare/v1.6.1...v1.7.0) (2026-05-20)
+
+
+### Features
+
+* **kcl:** GRPCRoute for in-cluster gRPC access ([#68](https://github.com/stuttgart-things/machinery/issues/68)) ([490fba0](https://github.com/stuttgart-things/machinery/commit/490fba096388b9e61cfb22ec02120419d413d7f4)), closes [#55](https://github.com/stuttgart-things/machinery/issues/55) [argocd#161](https://github.com/argocd/issues/161)
+
 ## [1.6.1](https://github.com/stuttgart-things/machinery/compare/v1.6.0...v1.6.1) (2026-05-19)
 
 
