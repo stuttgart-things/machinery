@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/stuttgart-things/machinery/compare/v1.8.0...v1.9.0) (2026-05-20)
+
+
+### Features
+
+* **kcl:** Secret-mount auth token ([#70](https://github.com/stuttgart-things/machinery/issues/70)) ([#71](https://github.com/stuttgart-things/machinery/issues/71)) ([1a49f60](https://github.com/stuttgart-things/machinery/commit/1a49f602f24ae450f5009b54cae123eca21d2c2f))
+
 # [1.8.0](https://github.com/stuttgart-things/machinery/compare/v1.7.0...v1.8.0) (2026-05-20)
 
 
