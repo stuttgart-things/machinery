@@ -26,6 +26,47 @@ builds:
       - amd64
       - arm64
 
+  # machinery-client: the gRPC CLI. Also built for windows — it's a
+  # client tool, not the server. Version metadata is injected here
+  # (the server build above does not need it).
+  - id: machinery-client
+    main: ./cmd/machinery-client
+    binary: machinery-client
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -extldflags=-static
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+# One archive per binary, so the server release keeps its existing
+# machinery_<ver>_<os>_<arch> asset and the client ships separately.
+archives:
+  - id: machinery
+    ids:
+      - machinery
+    name_template: "machinery_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: machinery-client
+    ids:
+      - machinery-client
+    name_template: "machinery-client_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
 checksum:
   name_template: "checksums.txt"
 

@@ -14,7 +14,7 @@ Client (gRPC)  ──> gRPC :50051 ─┘        (dynamic client)
 
 | Protocol | Port | Paths |
 |----------|------|-------|
-| gRPC | 50051 | `ResourceService.GetResources`, `ResourceService.GetResourceDetail` |
+| gRPC | 50051 | `ResourceService.GetResources`, `.GetResourceDetail`, `.WatchResources` |
 | HTTP | 8080 | `/` (dashboard), `/resources` (table), `/detail` (detail view), `/health` |
 
 ## Web Frontend
@@ -34,6 +34,7 @@ HTMX-based dashboard at `http://localhost:8080`:
 service ResourceService {
   rpc GetResources(ResourceRequest) returns (ResourceListResponse);
   rpc GetResourceDetail(ResourceDetailRequest) returns (ResourceStatus);
+  rpc WatchResources(ResourceRequest) returns (stream ResourceEvent);
 }
 
 message ResourceRequest {
@@ -56,7 +57,30 @@ message ResourceStatus {
   string namespace = 6;
   map<string, string> info_fields = 7;
 }
+
+enum EventType { ADDED = 0; MODIFIED = 1; DELETED = 2; }
+
+message ResourceEvent {
+  EventType type = 1;          // ADDED on subscribe (cache replay), then live
+  ResourceStatus resource = 2;
+}
 ```
+
+`GetResources` / `GetResourceDetail` answer from a shared informer cache — one watch per configured kind, no per-request API-server calls. `WatchResources` is a server stream: the current state replays as `ADDED` events on subscribe, then live `ADDED` / `MODIFIED` / `DELETED` deltas follow.
+
+## CLI client
+
+[`machinery-client`](cmd/machinery-client/README.md) is the gRPC client for the service. Pre-built binaries for linux/darwin/windows (amd64/arm64) are attached to every [release](https://github.com/stuttgart-things/machinery/releases); or build from source with `go build -o machinery-client ./cmd/machinery-client`.
+
+```bash
+machinery-client list  --kind='*'                       # GetResources
+machinery-client get   --kind=VsphereVM --name=demo-vm  # GetResourceDetail
+machinery-client watch --kind='*'                       # WatchResources (live stream)
+machinery-client health                                 # gRPC health probe
+machinery-client version
+```
+
+Connection flags — `--server`, `--insecure`, `--ca-cert`, `--tls-skip-verify`, `--token`, `--token-file`, `--timeout`, `--json` — and their `MACHINERY_*` env-var equivalents are accepted on every subcommand. See [`cmd/machinery-client/README.md`](cmd/machinery-client/README.md) for the full reference, TLS/auth setup, and the `grpcurl` no-code path.
 
 ## Configuration
 
@@ -186,13 +210,15 @@ ghcr.io/stuttgart-things/machinery:<tag>
 export KUBECONFIG=~/.kube/config
 go run main.go
 
-# Client
-export CLUSTERBOOK_SERVER=localhost:50051
-export SECURE_CONNECTION=false
-go run client/client.go
+# Client — the machinery-client CLI (see "CLI client" above)
+go run ./cmd/machinery-client list  --kind='*'
+go run ./cmd/machinery-client watch --kind='*'
 ```
 
-### Client Environment Variables
+`client/client.go` is a separate single-file smoke-test client driven by the
+environment variables below; `task client` runs it.
+
+### `client/client.go` environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
