@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/stuttgart-things/machinery/compare/v1.10.1...v1.11.0) (2026-05-21)
+
+
+### Features
+
+* **grpc:** serve resource reads from a shared informer cache ([#78](https://github.com/stuttgart-things/machinery/issues/78)) ([31ed13c](https://github.com/stuttgart-things/machinery/commit/31ed13c6170d3bb453a0449ebe5246913872eecf)), closes [#76](https://github.com/stuttgart-things/machinery/issues/76)
+
 ## [1.10.1](https://github.com/stuttgart-things/machinery/compare/v1.10.0...v1.10.1) (2026-05-21)
 
 
