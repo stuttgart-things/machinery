@@ -1,3 +1,10 @@
+## [1.10.1](https://github.com/stuttgart-things/machinery/compare/v1.10.0...v1.10.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **kcl:** set appProtocol h2c on gRPC Service port ([#73](https://github.com/stuttgart-things/machinery/issues/73)) ([ae65e63](https://github.com/stuttgart-things/machinery/commit/ae65e6387ade87e7656eb154630ff92cee93f2c2)), closes [stuttgart-things/argocd#188](https://github.com/stuttgart-things/argocd/issues/188) [stuttgart-things/argocd#184](https://github.com/stuttgart-things/argocd/issues/184)
+
 # [1.10.0](https://github.com/stuttgart-things/machinery/compare/v1.9.0...v1.10.0) (2026-05-20)
 
 
