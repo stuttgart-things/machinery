@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
 
@@ -24,7 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -33,10 +39,19 @@ var (
 	configPath = os.Getenv("MACHINERY_CONFIG")
 )
 
+// informerResync is the dynamic informer factory's resync period. The
+// watch keeps each cache fresh on its own; resync only re-delivers the
+// full set to event handlers periodically — harmless here, and a sane
+// default for the WatchResources work that builds on this cache.
+const informerResync = 10 * time.Minute
+
 type server struct {
 	resourceservice.UnimplementedResourceServiceServer
-	dynamicClient dynamic.Interface
-	config        *Config
+	config *Config
+	// listers holds one cache-backed lister per configured kind the
+	// cluster actually serves. Populated by startInformers; reads never
+	// hit the API server. A kind absent here was not served at startup.
+	listers map[string]cache.GenericLister
 }
 
 func main() {
@@ -72,6 +87,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Informer caches replace the old per-request List/Get against the
+	// API server: one watch per configured kind, shared by every gRPC
+	// call and every dashboard poll. stopCh tears them down on shutdown.
+	// This blocks until the caches warm, so the gRPC/HTTP servers below
+	// only start serving once reads can be answered from cache.
+	stopCh := make(chan struct{})
+	listers := startInformers(dynamicClient, cfg, stopCh)
+
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -79,7 +102,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &server{dynamicClient: dynamicClient, config: cfg}
+	srv := &server{config: cfg, listers: listers}
 
 	var grpcOpts []grpc.ServerOption
 	if cfg.Auth.Enabled {
@@ -130,6 +153,7 @@ func main() {
 		sig := <-sigCh
 		slog.Info("received shutdown signal", "signal", sig)
 		healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+		close(stopCh)
 		httpServer.Shutdown(context.Background())
 		s.GracefulStop()
 	}()
@@ -140,6 +164,57 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("server stopped")
+}
+
+// startInformers probes each configured kind, attaches a dynamic
+// informer for the ones the cluster actually serves, waits (bounded)
+// for their caches to warm, and returns one lister per live kind.
+// Kinds the API server does not serve (CRD absent, API version
+// retired) are skipped with a warning — one missing kind must not
+// stop the others, the same tolerance the old per-request List path
+// had. The informers run until stopCh is closed.
+func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) map[string]cache.GenericLister {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	factory := dynamicinformer.NewDynamicSharedInformerFactory(dc, informerResync)
+	listers := make(map[string]cache.GenericLister, len(cfg.Resources))
+
+	for kind, rk := range cfg.Resources {
+		gvr := rk.toGVR()
+		// One probe List per kind at startup (not per request): tells
+		// us whether the cluster serves this GVR before we attach an
+		// informer whose reflector would otherwise retry-spam forever.
+		if _, err := dc.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				slog.Warn("kind not served by cluster, skipping",
+					"kind", kind, "gvr", gvr.String())
+				continue
+			}
+			// Other errors (RBAC, transient API hiccup) — attach the
+			// informer anyway; its reflector retries and the lister
+			// fills in once access works.
+			slog.Warn("kind probe failed, attaching informer anyway",
+				"kind", kind, "gvr", gvr.String(), "error", err)
+		}
+		listers[kind] = factory.ForResource(gvr).Lister()
+	}
+
+	if len(listers) == 0 {
+		slog.Warn("no configured kinds are served by the cluster; resource queries will be empty")
+		return listers
+	}
+
+	factory.Start(stopCh)
+	slog.Info("waiting for informer cache sync", "kinds", len(listers))
+	for typ, ok := range factory.WaitForCacheSync(ctx.Done()) {
+		if !ok {
+			slog.Warn("informer cache did not sync before timeout; results may be briefly incomplete",
+				"type", typ.String())
+		}
+	}
+	slog.Info("informer caches ready", "kinds", len(listers))
+	return listers
 }
 
 func (s *server) GetResources(ctx context.Context, req *resourceservice.ResourceRequest) (*resourceservice.ResourceListResponse, error) {
@@ -175,33 +250,35 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 
 	for _, kind := range kinds {
 		rk := s.config.Resources[kind]
-		gvr := rk.toGVR()
 
-		slog.Debug("fetching resources", "kind", kind, "gvr", gvr.Resource)
-
-		resourceList, err := s.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			// Skip kinds the API server no longer serves (CRD removed,
-			// API version retired, beta graduated to stable, …). One
-			// broken kind shouldn't blank the dashboard for kinds that
-			// do work — log loudly so operators can spot config drift.
-			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-				slog.Warn("kind not available on cluster, skipping",
-					"kind", kind, "gvr", gvr.String(), "error", err)
-				continue
-			}
-			return nil, fmt.Errorf("error fetching resources for kind %s: %w", kind, err)
+		lister, ok := s.listers[kind]
+		if !ok {
+			// No informer for this kind — the cluster did not serve it
+			// at startup (CRD removed, API version retired). Skip, as
+			// the old per-request List path did on IsNotFound/NoMatch.
+			slog.Warn("kind has no informer cache, skipping", "kind", kind)
+			continue
 		}
 
-		for _, item := range resourceList.Items {
+		objs, err := lister.List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("error listing cached resources for kind %s: %w", kind, err)
+		}
+
+		for _, obj := range objs {
 			if req.Count == 0 {
 				break
 			}
-			statusMessage, ready := getResourceStatus(&item)
+			item, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				continue
+			}
 
-			connDetails := getConnectionDetails(&item, rk.ConnectionField)
+			statusMessage, ready := getResourceStatus(item)
+
+			connDetails := getConnectionDetails(item, rk.ConnectionField)
 			if len(rk.StatusFields) > 0 {
-				extra := getStatusDetails(&item, rk.StatusFields)
+				extra := getStatusDetails(item, rk.StatusFields)
 				if extra != "" {
 					if connDetails != "" {
 						connDetails = connDetails + " | " + extra
@@ -211,7 +288,7 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 				}
 			}
 
-			infoFields := getInfoFields(&item, rk.InfoFields)
+			infoFields := getInfoFields(item, rk.InfoFields)
 
 			allResources = append(allResources, &resourceservice.ResourceStatus{
 				Name:              item.GetName(),
@@ -228,6 +305,19 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 			}
 		}
 	}
+
+	// Informer stores are unordered; sort for a stable response so the
+	// dashboard rows don't shuffle between polls.
+	sort.Slice(allResources, func(i, j int) bool {
+		a, b := allResources[i], allResources[j]
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		return a.Name < b.Name
+	})
 
 	slog.Info("resources fetched", "count", len(allResources))
 	return &resourceservice.ResourceListResponse{Resources: allResources}, nil
@@ -337,15 +427,27 @@ func (s *server) GetResourceDetail(ctx context.Context, req *resourceservice.Res
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported kind %q", req.Kind)
 	}
 
-	gvr := rk.toGVR()
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
+	lister, ok := s.listers[req.Kind]
+	if !ok {
+		return nil, status.Errorf(codes.Unavailable, "kind %q is not served by the cluster", req.Kind)
 	}
 
-	item, err := s.dynamicClient.Resource(gvr).Namespace(ns).Get(ctx, req.Name, metav1.GetOptions{})
+	// Namespaced lookups key on namespace/name; cluster-scoped (or a
+	// caller that omits the namespace) on name alone.
+	var obj runtime.Object
+	var err error
+	if req.Namespace != "" {
+		obj, err = lister.ByNamespace(req.Namespace).Get(req.Name)
+	} else {
+		obj, err = lister.Get(req.Name)
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "resource %s/%s not found: %v", req.Kind, req.Name, err)
+	}
+
+	item, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "unexpected cached object type for %s/%s", req.Kind, req.Name)
 	}
 
 	statusMessage, ready := getResourceStatus(item)
