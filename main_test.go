@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -37,7 +40,7 @@ func buildTestServer(t *testing.T, dc *dynamicfake.FakeDynamicClient, cfg *Confi
 	t.Helper()
 	stopCh := make(chan struct{})
 	t.Cleanup(func() { close(stopCh) })
-	return &server{config: cfg, listers: startInformers(dc, cfg, stopCh)}
+	return &server{config: cfg, informers: startInformers(dc, cfg, stopCh)}
 }
 
 // fakeClientWithMissingKind builds a fake dynamic client that knows the
@@ -552,4 +555,123 @@ func makeObj(condType, condStatus string) map[string]any {
 			},
 		},
 	}
+}
+
+// --- WatchResources ---
+
+// mockWatchStream is a minimal ResourceService_WatchResourcesServer: it
+// records Send()s on a channel and returns a controllable context.
+// WatchResources only calls Context and Send, so the embedded (nil)
+// ServerStream is never dereferenced.
+type mockWatchStream struct {
+	grpc.ServerStream
+	ctx  context.Context
+	sent chan *resourceservice.ResourceEvent
+}
+
+func (m *mockWatchStream) Context() context.Context { return m.ctx }
+
+func (m *mockWatchStream) Send(e *resourceservice.ResourceEvent) error {
+	m.sent <- e
+	return nil
+}
+
+func harvesterVM(name, ns string) *unstructured.Unstructured {
+	vm := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
+			"kind":       "HarvesterVM",
+			"metadata":   map[string]any{"name": name, "namespace": ns},
+			"status": map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+				"vm":         map[string]any{"name": name},
+			},
+		},
+	}
+	vm.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
+	})
+	return vm
+}
+
+func TestWatchResources_InitialSnapshotThenCancel(t *testing.T) {
+	s := newTestServer(t, harvesterVM("watch-vm", "ns-1"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &mockWatchStream{ctx: ctx, sent: make(chan *resourceservice.ResourceEvent, 16)}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.WatchResources(&resourceservice.ResourceRequest{Kind: "HarvesterVM"}, stream)
+	}()
+
+	// The informer replays its cache to a freshly-attached handler, so
+	// the already-cached object arrives as an ADDED event.
+	select {
+	case ev := <-stream.sent:
+		if ev.Type != resourceservice.EventType_ADDED {
+			t.Errorf("expected ADDED, got %v", ev.Type)
+		}
+		if ev.Resource.GetName() != "watch-vm" {
+			t.Errorf("expected watch-vm, got %q", ev.Resource.GetName())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no ADDED event for the cached object")
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("WatchResources returned %v, want nil on client cancel", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WatchResources did not return after the client cancelled")
+	}
+}
+
+func TestWatchResources_InvalidKind(t *testing.T) {
+	s := newTestServer(t)
+	stream := &mockWatchStream{ctx: context.Background(), sent: make(chan *resourceservice.ResourceEvent, 1)}
+	err := s.WatchResources(&resourceservice.ResourceRequest{Kind: "Nonexistent"}, stream)
+	if st, _ := status.FromError(err); st.Code() != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v (err=%v)", st.Code(), err)
+	}
+}
+
+func TestWatchResources_LiveEvents(t *testing.T) {
+	scheme := runtime.NewScheme()
+	fc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, testListKinds)
+	s := buildTestServer(t, fc, defaultConfig())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := &mockWatchStream{ctx: ctx, sent: make(chan *resourceservice.ResourceEvent, 16)}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.WatchResources(&resourceservice.ResourceRequest{Kind: "HarvesterVM"}, stream)
+	}()
+
+	// Create an object once the watch is live; the informer observes it
+	// and the handler emits an ADDED event.
+	gvr := schema.GroupVersionResource{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "harvestervms",
+	}
+	if _, err := fc.Resource(gvr).Namespace("ns-live").Create(
+		context.Background(), harvesterVM("live-vm", "ns-live"), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	select {
+	case ev := <-stream.sent:
+		if ev.Resource.GetName() != "live-vm" {
+			t.Errorf("expected live-vm, got %q", ev.Resource.GetName())
+		}
+		if ev.Type != resourceservice.EventType_ADDED {
+			t.Errorf("expected ADDED, got %v", ev.Type)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event for the created object")
+	}
+
+	cancel()
+	<-errCh
 }

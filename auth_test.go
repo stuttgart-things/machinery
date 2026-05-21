@@ -150,3 +150,49 @@ func TestResolveAuthToken_InlineBeatsEnv(t *testing.T) {
 		t.Fatalf("got %q, want inline-token (env should not override an inline token)", got)
 	}
 }
+
+// fakeServerStream is a grpc.ServerStream carrying a fixed context —
+// enough for the stream interceptor, which only reads ss.Context().
+type fakeServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (f *fakeServerStream) Context() context.Context { return f.ctx }
+
+func okStreamHandler(_ any, _ grpc.ServerStream) error { return nil }
+
+func TestAuthStreamInterceptor_ValidToken_PassesThrough(t *testing.T) {
+	interceptor := newAuthStreamInterceptor(testToken)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+testToken))
+	err := interceptor(nil, &fakeServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: "/Foo/Watch"}, okStreamHandler)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAuthStreamInterceptor_BadToken_Unauthenticated(t *testing.T) {
+	interceptor := newAuthStreamInterceptor(testToken)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer wrong-token"))
+	err := interceptor(nil, &fakeServerStream{ctx: ctx}, &grpc.StreamServerInfo{FullMethod: "/Foo/Watch"}, okStreamHandler)
+	if got := status.Code(err); got != codes.Unauthenticated {
+		t.Fatalf("got code %v, want Unauthenticated", got)
+	}
+}
+
+func TestAuthStreamInterceptor_MissingMetadata_Unauthenticated(t *testing.T) {
+	interceptor := newAuthStreamInterceptor(testToken)
+	err := interceptor(nil, &fakeServerStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/Foo/Watch"}, okStreamHandler)
+	if got := status.Code(err); got != codes.Unauthenticated {
+		t.Fatalf("got code %v, want Unauthenticated", got)
+	}
+}
+
+func TestAuthStreamInterceptor_HealthExempt(t *testing.T) {
+	interceptor := newAuthStreamInterceptor(testToken)
+	// No metadata at all; the health Watch stream must still pass.
+	err := interceptor(nil, &fakeServerStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/grpc.health.v1.Health/Watch"}, okStreamHandler)
+	if err != nil {
+		t.Fatalf("health stream should bypass auth, got error: %v", err)
+	}
+}

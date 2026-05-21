@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -41,17 +43,23 @@ var (
 
 // informerResync is the dynamic informer factory's resync period. The
 // watch keeps each cache fresh on its own; resync only re-delivers the
-// full set to event handlers periodically — harmless here, and a sane
-// default for the WatchResources work that builds on this cache.
+// full set to event handlers periodically — harmless here, and it gives
+// long-lived WatchResources streams a periodic self-heal.
 const informerResync = 10 * time.Minute
+
+// watchBufferSize bounds the per-stream event backlog. A client that
+// falls more than this many events behind gets ResourceExhausted and
+// is expected to reconnect (which replays a fresh snapshot).
+const watchBufferSize = 256
 
 type server struct {
 	resourceservice.UnimplementedResourceServiceServer
 	config *Config
-	// listers holds one cache-backed lister per configured kind the
-	// cluster actually serves. Populated by startInformers; reads never
-	// hit the API server. A kind absent here was not served at startup.
-	listers map[string]cache.GenericLister
+	// informers holds one shared informer per configured kind the
+	// cluster serves. Reads use the informer's Lister (cache, no API
+	// call); WatchResources attaches event handlers. A kind absent here
+	// was not served at startup. Populated by startInformers.
+	informers map[string]informers.GenericInformer
 }
 
 func main() {
@@ -93,7 +101,7 @@ func main() {
 	// This blocks until the caches warm, so the gRPC/HTTP servers below
 	// only start serving once reads can be answered from cache.
 	stopCh := make(chan struct{})
-	listers := startInformers(dynamicClient, cfg, stopCh)
+	infs := startInformers(dynamicClient, cfg, stopCh)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	lis, err := net.Listen("tcp", addr)
@@ -102,9 +110,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &server{config: cfg, listers: listers}
+	srv := &server{config: cfg, informers: infs}
 
-	var grpcOpts []grpc.ServerOption
+	// Keepalive keeps long-lived WatchResources streams alive through
+	// idle timeouts on the gateway/proxy in front of the server.
+	grpcOpts := []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    2 * time.Minute,
+			Timeout: 20 * time.Second,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             time.Minute,
+			PermitWithoutStream: true,
+		}),
+	}
 	if cfg.Auth.Enabled {
 		token, err := resolveAuthToken(cfg.Auth)
 		if err != nil {
@@ -115,7 +134,10 @@ func main() {
 			slog.Error("auth enabled but no token resolved", "tokenFile", cfg.Auth.TokenFile, "tokenEnvVar", cfg.Auth.TokenEnvVar)
 			os.Exit(1)
 		}
-		grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(newAuthInterceptor(token)))
+		grpcOpts = append(grpcOpts,
+			grpc.UnaryInterceptor(newAuthInterceptor(token)),
+			grpc.StreamInterceptor(newAuthStreamInterceptor(token)),
+		)
 		slog.Info("gRPC auth enabled (bearer token)")
 	}
 
@@ -168,17 +190,17 @@ func main() {
 
 // startInformers probes each configured kind, attaches a dynamic
 // informer for the ones the cluster actually serves, waits (bounded)
-// for their caches to warm, and returns one lister per live kind.
+// for their caches to warm, and returns one informer per live kind.
 // Kinds the API server does not serve (CRD absent, API version
 // retired) are skipped with a warning — one missing kind must not
 // stop the others, the same tolerance the old per-request List path
 // had. The informers run until stopCh is closed.
-func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) map[string]cache.GenericLister {
+func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) map[string]informers.GenericInformer {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	factory := dynamicinformer.NewDynamicSharedInformerFactory(dc, informerResync)
-	listers := make(map[string]cache.GenericLister, len(cfg.Resources))
+	infs := make(map[string]informers.GenericInformer, len(cfg.Resources))
 
 	for kind, rk := range cfg.Resources {
 		gvr := rk.toGVR()
@@ -192,29 +214,80 @@ func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) m
 				continue
 			}
 			// Other errors (RBAC, transient API hiccup) — attach the
-			// informer anyway; its reflector retries and the lister
+			// informer anyway; its reflector retries and the cache
 			// fills in once access works.
 			slog.Warn("kind probe failed, attaching informer anyway",
 				"kind", kind, "gvr", gvr.String(), "error", err)
 		}
-		listers[kind] = factory.ForResource(gvr).Lister()
+		infs[kind] = factory.ForResource(gvr)
 	}
 
-	if len(listers) == 0 {
+	if len(infs) == 0 {
 		slog.Warn("no configured kinds are served by the cluster; resource queries will be empty")
-		return listers
+		return infs
 	}
 
 	factory.Start(stopCh)
-	slog.Info("waiting for informer cache sync", "kinds", len(listers))
+	slog.Info("waiting for informer cache sync", "kinds", len(infs))
 	for typ, ok := range factory.WaitForCacheSync(ctx.Done()) {
 		if !ok {
 			slog.Warn("informer cache did not sync before timeout; results may be briefly incomplete",
 				"type", typ.String())
 		}
 	}
-	slog.Info("informer caches ready", "kinds", len(listers))
-	return listers
+	slog.Info("informer caches ready", "kinds", len(infs))
+	return infs
+}
+
+// resolveKinds expands "" / "*" to every configured kind and validates
+// each requested kind against the config. Shared by GetResources and
+// WatchResources.
+func (s *server) resolveKinds(kind string) ([]string, error) {
+	if kind == "" || kind == "*" {
+		kinds := make([]string, 0, len(s.config.Resources))
+		for k := range s.config.Resources {
+			kinds = append(kinds, k)
+		}
+		return kinds, nil
+	}
+	kinds := strings.Split(kind, ",")
+	for _, k := range kinds {
+		if _, ok := s.config.Resources[k]; !ok {
+			supported := make([]string, 0, len(s.config.Resources))
+			for sk := range s.config.Resources {
+				supported = append(supported, sk)
+			}
+			return nil, status.Errorf(codes.InvalidArgument,
+				"unsupported kind %q, valid kinds: %s", k, strings.Join(supported, ", "))
+		}
+	}
+	return kinds, nil
+}
+
+// toResourceStatus projects a cached object into the gRPC
+// ResourceStatus, applying the kind's connection/status/info field
+// mappings. Shared by GetResources, GetResourceDetail and the watch.
+func toResourceStatus(item *unstructured.Unstructured, kind string, rk ResourceKind) *resourceservice.ResourceStatus {
+	statusMessage, ready := getResourceStatus(item)
+	connDetails := getConnectionDetails(item, rk.ConnectionField)
+	if len(rk.StatusFields) > 0 {
+		if extra := getStatusDetails(item, rk.StatusFields); extra != "" {
+			if connDetails != "" {
+				connDetails = connDetails + " | " + extra
+			} else {
+				connDetails = extra
+			}
+		}
+	}
+	return &resourceservice.ResourceStatus{
+		Name:              item.GetName(),
+		Kind:              kind,
+		Ready:             ready,
+		StatusMessage:     statusMessage,
+		ConnectionDetails: connDetails,
+		Namespace:         item.GetNamespace(),
+		InfoFields:        getInfoFields(item, rk.InfoFields),
+	}
 }
 
 func (s *server) GetResources(ctx context.Context, req *resourceservice.ResourceRequest) (*resourceservice.ResourceListResponse, error) {
@@ -226,32 +299,14 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 			"count must be between -1 (all) and 1000, got %d", req.Count)
 	}
 
-	if req.Kind == "" || req.Kind == "*" {
-		kinds := make([]string, 0, len(s.config.Resources))
-		for k := range s.config.Resources {
-			kinds = append(kinds, k)
-		}
-		req.Kind = strings.Join(kinds, ",")
-	}
-
-	kinds := strings.Split(req.Kind, ",")
-	for _, kind := range kinds {
-		if _, ok := s.config.Resources[kind]; !ok {
-			supported := make([]string, 0, len(s.config.Resources))
-			for k := range s.config.Resources {
-				supported = append(supported, k)
-			}
-			return nil, status.Errorf(codes.InvalidArgument,
-				"unsupported kind %q, valid kinds: %s", kind, strings.Join(supported, ", "))
-		}
+	kinds, err := s.resolveKinds(req.Kind)
+	if err != nil {
+		return nil, err
 	}
 
 	var allResources []*resourceservice.ResourceStatus
-
 	for _, kind := range kinds {
-		rk := s.config.Resources[kind]
-
-		lister, ok := s.listers[kind]
+		inf, ok := s.informers[kind]
 		if !ok {
 			// No informer for this kind — the cluster did not serve it
 			// at startup (CRD removed, API version retired). Skip, as
@@ -259,12 +314,11 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 			slog.Warn("kind has no informer cache, skipping", "kind", kind)
 			continue
 		}
-
-		objs, err := lister.List(labels.Everything())
+		objs, err := inf.Lister().List(labels.Everything())
 		if err != nil {
 			return nil, fmt.Errorf("error listing cached resources for kind %s: %w", kind, err)
 		}
-
+		rk := s.config.Resources[kind]
 		for _, obj := range objs {
 			if req.Count == 0 {
 				break
@@ -273,33 +327,7 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 			if !ok {
 				continue
 			}
-
-			statusMessage, ready := getResourceStatus(item)
-
-			connDetails := getConnectionDetails(item, rk.ConnectionField)
-			if len(rk.StatusFields) > 0 {
-				extra := getStatusDetails(item, rk.StatusFields)
-				if extra != "" {
-					if connDetails != "" {
-						connDetails = connDetails + " | " + extra
-					} else {
-						connDetails = extra
-					}
-				}
-			}
-
-			infoFields := getInfoFields(item, rk.InfoFields)
-
-			allResources = append(allResources, &resourceservice.ResourceStatus{
-				Name:              item.GetName(),
-				Kind:              kind,
-				Ready:             ready,
-				StatusMessage:     statusMessage,
-				ConnectionDetails: connDetails,
-				Namespace:         item.GetNamespace(),
-				InfoFields:        infoFields,
-			})
-
+			allResources = append(allResources, toResourceStatus(item, kind, rk))
 			if req.Count > 0 {
 				req.Count--
 			}
@@ -427,10 +455,11 @@ func (s *server) GetResourceDetail(ctx context.Context, req *resourceservice.Res
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported kind %q", req.Kind)
 	}
 
-	lister, ok := s.listers[req.Kind]
+	inf, ok := s.informers[req.Kind]
 	if !ok {
 		return nil, status.Errorf(codes.Unavailable, "kind %q is not served by the cluster", req.Kind)
 	}
+	lister := inf.Lister()
 
 	// Namespaced lookups key on namespace/name; cluster-scoped (or a
 	// caller that omits the namespace) on name alone.
@@ -450,29 +479,100 @@ func (s *server) GetResourceDetail(ctx context.Context, req *resourceservice.Res
 		return nil, status.Errorf(codes.Internal, "unexpected cached object type for %s/%s", req.Kind, req.Name)
 	}
 
-	statusMessage, ready := getResourceStatus(item)
-	connDetails := getConnectionDetails(item, rk.ConnectionField)
-	if len(rk.StatusFields) > 0 {
-		extra := getStatusDetails(item, rk.StatusFields)
-		if extra != "" {
-			if connDetails != "" {
-				connDetails = connDetails + " | " + extra
-			} else {
-				connDetails = extra
+	return toResourceStatus(item, req.Kind, rk), nil
+}
+
+// WatchResources streams resource changes for the requested kind(s).
+// Each kind's informer replays its current cache as ADDED events on
+// subscribe, then live ADDED/MODIFIED/DELETED deltas follow until the
+// client disconnects. ResourceRequest.count is ignored — a watch is
+// unbounded by nature.
+func (s *server) WatchResources(req *resourceservice.ResourceRequest, stream resourceservice.ResourceService_WatchResourcesServer) error {
+	kinds, err := s.resolveKinds(req.Kind)
+	if err != nil {
+		return err
+	}
+
+	// Buffered so a brief slow patch on the client doesn't stall the
+	// informer's shared delivery goroutine. On overflow the stream ends
+	// with ResourceExhausted; the client reconnects and re-syncs rather
+	// than silently missing events.
+	events := make(chan *resourceservice.ResourceEvent, watchBufferSize)
+	overflow := make(chan struct{}, 1)
+
+	var registered []string
+	for _, kind := range kinds {
+		inf, ok := s.informers[kind]
+		if !ok {
+			slog.Warn("watch: kind has no informer cache, skipping", "kind", kind)
+			continue
+		}
+		rk := s.config.Resources[kind]
+		reg, err := inf.Informer().AddEventHandler(watchHandler(kind, rk, events, overflow))
+		if err != nil {
+			return status.Errorf(codes.Internal, "registering watch for kind %s: %v", kind, err)
+		}
+		defer func(kind string, inf informers.GenericInformer, reg cache.ResourceEventHandlerRegistration) {
+			if err := inf.Informer().RemoveEventHandler(reg); err != nil {
+				slog.Warn("watch: removing event handler", "kind", kind, "error", err)
+			}
+		}(kind, inf, reg)
+		registered = append(registered, kind)
+	}
+
+	slog.Info("watch started", "kinds", registered)
+	for {
+		select {
+		case <-stream.Context().Done():
+			slog.Info("watch closed by client", "kinds", registered)
+			return nil
+		case <-overflow:
+			return status.Error(codes.ResourceExhausted,
+				"event backlog overflowed; reconnect to re-sync")
+		case ev := <-events:
+			if err := stream.Send(ev); err != nil {
+				return err
 			}
 		}
 	}
-	infoFields := getInfoFields(item, rk.InfoFields)
+}
 
-	return &resourceservice.ResourceStatus{
-		Name:              item.GetName(),
-		Kind:              req.Kind,
-		Ready:             ready,
-		StatusMessage:     statusMessage,
-		ConnectionDetails: connDetails,
-		Namespace:         item.GetNamespace(),
-		InfoFields:        infoFields,
-	}, nil
+// watchHandler builds informer callbacks that project each change into
+// a ResourceEvent and feed it to the stream. Sends are non-blocking:
+// the callbacks run on the informer's shared goroutine and must never
+// block it, so an overflowing buffer signals overflow instead.
+func watchHandler(kind string, rk ResourceKind, events chan<- *resourceservice.ResourceEvent, overflow chan<- struct{}) cache.ResourceEventHandlerFuncs {
+	emit := func(t resourceservice.EventType, obj any) {
+		item, ok := asUnstructured(obj)
+		if !ok {
+			return
+		}
+		ev := &resourceservice.ResourceEvent{Type: t, Resource: toResourceStatus(item, kind, rk)}
+		select {
+		case events <- ev:
+		default:
+			select {
+			case overflow <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj any) { emit(resourceservice.EventType_ADDED, obj) },
+		UpdateFunc: func(_, newObj any) { emit(resourceservice.EventType_MODIFIED, newObj) },
+		DeleteFunc: func(obj any) { emit(resourceservice.EventType_DELETED, obj) },
+	}
+}
+
+// asUnstructured unwraps the object an informer hands a callback,
+// including the DeletedFinalStateUnknown tombstone a delete delivers
+// when the final state was missed.
+func asUnstructured(obj any) (*unstructured.Unstructured, bool) {
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+	item, ok := obj.(*unstructured.Unstructured)
+	return item, ok
 }
 
 func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
