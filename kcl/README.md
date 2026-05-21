@@ -145,6 +145,14 @@ grpcurl -H "authorization: Bearer ${TOKEN}" \
   resourceservice.ResourceService/GetResources
 ```
 
+> **Off-cluster gRPC over `:443` needs HTTP/2 ALPN on the Gateway.** gRPC
+> mandates HTTP/2; if the Cilium Gateway's HTTPS listener doesn't advertise
+> `h2` in its TLS ALPN the commands above fail at the handshake
+> (`No ALPN negotiated`) before any gRPC frames are exchanged. ALPN is not a
+> Gateway API or KCL field — it's the Cilium **install** value
+> `gatewayAPI.enableAlpn: true`, which also turns on `appProtocol` support so
+> the gRPC Service port's `appProtocol: kubernetes.io/h2c` is honored upstream.
+
 The HTMX dashboard is unaffected — its calls are in-process and bypass the
 interceptor. `/grpc.health.v1.Health/*` also stays anonymous, so liveness/readiness
 probes keep working without the token.
