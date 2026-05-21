@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/stuttgart-things/machinery/compare/v1.11.0...v1.12.0) (2026-05-21)
+
+
+### Features
+
+* **grpc:** add WatchResources streaming RPC ([#79](https://github.com/stuttgart-things/machinery/issues/79)) ([067b6e5](https://github.com/stuttgart-things/machinery/commit/067b6e5669fb0602b2803cda7454b4351a9a570c))
+
 # [1.11.0](https://github.com/stuttgart-things/machinery/compare/v1.10.1...v1.11.0) (2026-05-21)
 
 
