@@ -45,6 +45,32 @@ func resolveAuthToken(cfg AuthConfig) (string, error) {
 	return "", nil
 }
 
+// authorize checks the incoming context for a valid
+// `authorization: Bearer <token>` header. Shared by the unary and
+// stream interceptors. gRPC lower-cases metadata keys; the scheme
+// prefix is matched case-insensitively per RFC 6750.
+func authorize(ctx context.Context, expected []byte) error {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return status.Error(codes.Unauthenticated, "missing authorization header")
+	}
+	raw := values[0]
+	const prefix = "bearer "
+	if len(raw) <= len(prefix) || !strings.EqualFold(raw[:len(prefix)], prefix) {
+		return status.Error(codes.Unauthenticated, "authorization scheme must be Bearer")
+	}
+	got := []byte(strings.TrimSpace(raw[len(prefix):]))
+	if subtle.ConstantTimeEq(int32(len(got)), int32(len(expected))) != 1 ||
+		subtle.ConstantTimeCompare(got, expected) != 1 {
+		return status.Error(codes.Unauthenticated, "invalid token")
+	}
+	return nil
+}
+
 // newAuthInterceptor returns a UnaryServerInterceptor that requires
 // `authorization: Bearer <token>` metadata on every RPC except those
 // under /grpc.health.v1.Health/ (LB/k8s probes stay anonymous).
@@ -56,26 +82,25 @@ func newAuthInterceptor(expected string) grpc.UnaryServerInterceptor {
 		if strings.HasPrefix(info.FullMethod, healthServicePrefix) {
 			return handler(ctx, req)
 		}
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing metadata")
-		}
-		values := md.Get("authorization")
-		if len(values) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing authorization header")
-		}
-		// gRPC normalizes keys to lower-case but the scheme prefix is
-		// case-insensitive per RFC 6750; match either Bearer or bearer.
-		raw := values[0]
-		const prefix = "bearer "
-		if len(raw) <= len(prefix) || !strings.EqualFold(raw[:len(prefix)], prefix) {
-			return nil, status.Error(codes.Unauthenticated, "authorization scheme must be Bearer")
-		}
-		got := []byte(strings.TrimSpace(raw[len(prefix):]))
-		if subtle.ConstantTimeEq(int32(len(got)), int32(len(expectedBytes))) != 1 ||
-			subtle.ConstantTimeCompare(got, expectedBytes) != 1 {
-			return nil, status.Error(codes.Unauthenticated, "invalid token")
+		if err := authorize(ctx, expectedBytes); err != nil {
+			return nil, err
 		}
 		return handler(ctx, req)
+	}
+}
+
+// newAuthStreamInterceptor is the streaming counterpart of
+// newAuthInterceptor — the same bearer-token rule applied to streaming
+// RPCs such as WatchResources. The health service stays exempt.
+func newAuthStreamInterceptor(expected string) grpc.StreamServerInterceptor {
+	expectedBytes := []byte(expected)
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if strings.HasPrefix(info.FullMethod, healthServicePrefix) {
+			return handler(srv, ss)
+		}
+		if err := authorize(ss.Context(), expectedBytes); err != nil {
+			return err
+		}
+		return handler(srv, ss)
 	}
 }

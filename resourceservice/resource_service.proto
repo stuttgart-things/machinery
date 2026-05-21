@@ -33,8 +33,25 @@ message ResourceListResponse {
     repeated ResourceStatus resources = 1;
 }
 
+// EventType classifies a ResourceEvent on a watched resource.
+enum EventType {
+    ADDED = 0;
+    MODIFIED = 1;
+    DELETED = 2;
+}
+
+// ResourceEvent is a single change observed on a watched resource.
+message ResourceEvent {
+    EventType type = 1;
+    ResourceStatus resource = 2;
+}
+
 // Service definition
 service ResourceService {
     rpc GetResources(ResourceRequest) returns (ResourceListResponse);
     rpc GetResourceDetail(ResourceDetailRequest) returns (ResourceStatus);
+    // WatchResources streams resource changes for the requested kind(s).
+    // The current cache is replayed as ADDED events on subscribe, then
+    // live ADDED/MODIFIED/DELETED deltas follow until the client leaves.
+    rpc WatchResources(ResourceRequest) returns (stream ResourceEvent);
 }

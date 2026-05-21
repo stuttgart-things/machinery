@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ResourceService_GetResources_FullMethodName      = "/resourceservice.ResourceService/GetResources"
 	ResourceService_GetResourceDetail_FullMethodName = "/resourceservice.ResourceService/GetResourceDetail"
+	ResourceService_WatchResources_FullMethodName    = "/resourceservice.ResourceService/WatchResources"
 )
 
 // ResourceServiceClient is the client API for ResourceService service.
@@ -31,6 +32,10 @@ const (
 type ResourceServiceClient interface {
 	GetResources(ctx context.Context, in *ResourceRequest, opts ...grpc.CallOption) (*ResourceListResponse, error)
 	GetResourceDetail(ctx context.Context, in *ResourceDetailRequest, opts ...grpc.CallOption) (*ResourceStatus, error)
+	// WatchResources streams resource changes for the requested kind(s).
+	// The current cache is replayed as ADDED events on subscribe, then
+	// live ADDED/MODIFIED/DELETED deltas follow until the client leaves.
+	WatchResources(ctx context.Context, in *ResourceRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResourceEvent], error)
 }
 
 type resourceServiceClient struct {
@@ -61,6 +66,25 @@ func (c *resourceServiceClient) GetResourceDetail(ctx context.Context, in *Resou
 	return out, nil
 }
 
+func (c *resourceServiceClient) WatchResources(ctx context.Context, in *ResourceRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ResourceEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ResourceService_ServiceDesc.Streams[0], ResourceService_WatchResources_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ResourceRequest, ResourceEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ResourceService_WatchResourcesClient = grpc.ServerStreamingClient[ResourceEvent]
+
 // ResourceServiceServer is the server API for ResourceService service.
 // All implementations must embed UnimplementedResourceServiceServer
 // for forward compatibility.
@@ -69,6 +93,10 @@ func (c *resourceServiceClient) GetResourceDetail(ctx context.Context, in *Resou
 type ResourceServiceServer interface {
 	GetResources(context.Context, *ResourceRequest) (*ResourceListResponse, error)
 	GetResourceDetail(context.Context, *ResourceDetailRequest) (*ResourceStatus, error)
+	// WatchResources streams resource changes for the requested kind(s).
+	// The current cache is replayed as ADDED events on subscribe, then
+	// live ADDED/MODIFIED/DELETED deltas follow until the client leaves.
+	WatchResources(*ResourceRequest, grpc.ServerStreamingServer[ResourceEvent]) error
 	mustEmbedUnimplementedResourceServiceServer()
 }
 
@@ -84,6 +112,9 @@ func (UnimplementedResourceServiceServer) GetResources(context.Context, *Resourc
 }
 func (UnimplementedResourceServiceServer) GetResourceDetail(context.Context, *ResourceDetailRequest) (*ResourceStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetResourceDetail not implemented")
+}
+func (UnimplementedResourceServiceServer) WatchResources(*ResourceRequest, grpc.ServerStreamingServer[ResourceEvent]) error {
+	return status.Error(codes.Unimplemented, "method WatchResources not implemented")
 }
 func (UnimplementedResourceServiceServer) mustEmbedUnimplementedResourceServiceServer() {}
 func (UnimplementedResourceServiceServer) testEmbeddedByValue()                         {}
@@ -142,6 +173,17 @@ func _ResourceService_GetResourceDetail_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ResourceService_WatchResources_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ResourceRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ResourceServiceServer).WatchResources(m, &grpc.GenericServerStream[ResourceRequest, ResourceEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ResourceService_WatchResourcesServer = grpc.ServerStreamingServer[ResourceEvent]
+
 // ResourceService_ServiceDesc is the grpc.ServiceDesc for ResourceService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -158,6 +200,12 @@ var ResourceService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ResourceService_GetResourceDetail_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchResources",
+			Handler:       _ResourceService_WatchResources_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "resourceservice/resource_service.proto",
 }
