@@ -12,7 +12,7 @@ import (
 )
 
 func TestWebIndex(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -66,7 +66,7 @@ func TestWebResources(t *testing.T) {
 		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 	})
 
-	srv := newTestServer(obj)
+	srv := newTestServer(t, obj)
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -92,7 +92,7 @@ func TestWebResources(t *testing.T) {
 }
 
 func TestWebResourcesEmpty(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -111,7 +111,7 @@ func TestWebResourcesEmpty(t *testing.T) {
 }
 
 func TestWebHealth(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -130,7 +130,7 @@ func TestWebHealth(t *testing.T) {
 }
 
 func TestWebNotFound(t *testing.T) {
-	srv := newTestServer()
+	srv := newTestServer(t)
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -164,7 +164,7 @@ func TestWebResourcesNamespaceFilter(t *testing.T) {
 		return obj
 	}
 
-	srv := newTestServer(mkVM("vm-a", "team-a"), mkVM("vm-b", "team-b"), mkVM("vm-c", "team-a"))
+	srv := newTestServer(t, mkVM("vm-a", "team-a"), mkVM("vm-b", "team-b"), mkVM("vm-c", "team-a"))
 	webSrv, err := newWebServer(srv)
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
@@ -235,7 +235,7 @@ func TestWebResourcesNamespaceFilter(t *testing.T) {
 		clusterObj.SetGroupVersionKind(schema.GroupVersionKind{
 			Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 		})
-		srv2 := newTestServer(mkVM("vm-a", "team-a"), clusterObj)
+		srv2 := newTestServer(t, mkVM("vm-a", "team-a"), clusterObj)
 		webSrv2, _ := newWebServer(srv2)
 
 		req := httptest.NewRequest("GET", "/resources?kind=HarvesterVM&namespace=team-a", nil)

@@ -18,29 +18,37 @@ import (
 )
 
 var testListKinds = map[schema.GroupVersionResource]string{
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "harvestervms"}:         "HarvesterVMList",
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "storageplatforms"}:     "StoragePlatformList",
-	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "networkintegrations"}:  "NetworkIntegrationList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "harvestervms"}:        "HarvesterVMList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "storageplatforms"}:    "StoragePlatformList",
+	{Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "networkintegrations"}: "NetworkIntegrationList",
 }
 
-func newTestServer(objects ...runtime.Object) *server {
+func newTestServer(t *testing.T, objects ...runtime.Object) *server {
+	t.Helper()
 	scheme := runtime.NewScheme()
 	fakeClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, testListKinds, objects...)
-	return &server{
-		dynamicClient: fakeClient,
-		config:        defaultConfig(),
-	}
+	return buildTestServer(t, fakeClient, defaultConfig())
 }
 
-// newTestServerWithMissingKind builds a server whose fake dynamic
-// client knows the given GVR (so it doesn't panic on a List call)
-// but a reactor intercepts that List and returns NotFound — the
-// same response shape the real API server uses when a CRD is gone
-// or a beta API version has been retired. The fake's "kind is
-// registered with customListKinds" check runs *before* reactors,
-// so the GVR has to be in the kind map for the reactor to even
-// get a chance.
-func newTestServerWithMissingKind(missing schema.GroupVersionResource, listKind string, objects ...runtime.Object) *server {
+// buildTestServer wires the production startInformers() against a fake
+// dynamic client, so tests exercise the same informer-cache read path
+// as the running server. The informers are torn down via t.Cleanup.
+func buildTestServer(t *testing.T, dc *dynamicfake.FakeDynamicClient, cfg *Config) *server {
+	t.Helper()
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { close(stopCh) })
+	return &server{config: cfg, listers: startInformers(dc, cfg, stopCh)}
+}
+
+// fakeClientWithMissingKind builds a fake dynamic client that knows the
+// given GVR's list-kind (so List doesn't panic) but whose List reactor
+// returns NotFound — the same response shape the real API server uses
+// when a CRD is gone or a beta API version has been retired. The fake's
+// "kind is registered with customListKinds" check runs *before*
+// reactors, so the GVR has to be in the kind map for the reactor to get
+// a chance. startInformers' startup probe sees the NotFound and skips
+// the kind, attaching no informer for it.
+func fakeClientWithMissingKind(missing schema.GroupVersionResource, listKind string, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	scheme := runtime.NewScheme()
 	kinds := map[schema.GroupVersionResource]string{}
 	for k, v := range testListKinds {
@@ -51,7 +59,7 @@ func newTestServerWithMissingKind(missing schema.GroupVersionResource, listKind 
 	fakeClient.PrependReactor("list", missing.Resource, func(action clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: missing.Group, Resource: missing.Resource}, "")
 	})
-	return &server{dynamicClient: fakeClient, config: defaultConfig()}
+	return fakeClient
 }
 
 func TestGetResources_SkipsKindsMissingFromCluster(t *testing.T) {
@@ -70,14 +78,16 @@ func TestGetResources_SkipsKindsMissingFromCluster(t *testing.T) {
 		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 	})
 
-	// One healthy kind from defaultConfig, plus an additional kind
-	// the (simulated) cluster doesn't serve. With the resilience fix
-	// the call should succeed and just drop the broken kind.
+	// defaultConfig's healthy kinds, plus one the (simulated) cluster
+	// doesn't serve. The missing kind must be in the config *before*
+	// the server is built, so startInformers' startup probe is what
+	// drops it — the call should then succeed and just omit that kind.
 	missing := schema.GroupVersionResource{Group: "example.com", Version: "v1beta1", Resource: "gonefromclusters"}
-	s := newTestServerWithMissingKind(missing, "GoneFromClusterList", vm)
-	s.config.Resources["GoneFromCluster"] = ResourceKind{
+	cfg := defaultConfig()
+	cfg.Resources["GoneFromCluster"] = ResourceKind{
 		Group: missing.Group, Version: missing.Version, Resource: missing.Resource,
 	}
+	s := buildTestServer(t, fakeClientWithMissingKind(missing, "GoneFromClusterList", vm), cfg)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "*",
@@ -100,10 +110,14 @@ func TestGetResources_AllKindsMissingReturnsEmpty(t *testing.T) {
 	// instead of an HTTP 500. Failing loudly here would only make
 	// every fresh install with a stale config look broken.
 	missing := schema.GroupVersionResource{Group: "example.com", Version: "v1beta1", Resource: "onlygonekinds"}
-	s := newTestServerWithMissingKind(missing, "OnlyGoneKindList")
-	s.config.Resources = map[string]ResourceKind{
-		"OnlyGoneKind": {Group: missing.Group, Version: missing.Version, Resource: missing.Resource},
+	cfg := &Config{
+		Port:     50051,
+		HttpPort: 8080,
+		Resources: map[string]ResourceKind{
+			"OnlyGoneKind": {Group: missing.Group, Version: missing.Version, Resource: missing.Resource},
+		},
 	}
+	s := buildTestServer(t, fakeClientWithMissingKind(missing, "OnlyGoneKindList"), cfg)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "*",
@@ -118,7 +132,7 @@ func TestGetResources_AllKindsMissingReturnsEmpty(t *testing.T) {
 }
 
 func TestGetResources_InvalidKind(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	_, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "NonExistent",
 		Count: 5,
@@ -136,7 +150,7 @@ func TestGetResources_InvalidKind(t *testing.T) {
 }
 
 func TestGetResources_InvalidCount(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	_, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "HarvesterVM",
 		Count: 5000,
@@ -154,7 +168,7 @@ func TestGetResources_InvalidCount(t *testing.T) {
 }
 
 func TestGetResources_EmptyResult(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "HarvesterVM",
 		Count: -1,
@@ -202,7 +216,7 @@ func TestGetResources_WithResources(t *testing.T) {
 		Kind:    "HarvesterVM",
 	})
 
-	s := newTestServer(obj)
+	s := newTestServer(t, obj)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "HarvesterVM",
@@ -253,7 +267,7 @@ func TestGetResources_CountLimit(t *testing.T) {
 		objects = append(objects, obj)
 	}
 
-	s := newTestServer(objects...)
+	s := newTestServer(t, objects...)
 
 	resp, err := s.GetResources(context.Background(), &resourceservice.ResourceRequest{
 		Kind:  "HarvesterVM",
@@ -267,12 +281,63 @@ func TestGetResources_CountLimit(t *testing.T) {
 	}
 }
 
+func TestGetResourceDetail(t *testing.T) {
+	vm := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
+			"kind":       "HarvesterVM",
+			"metadata":   map[string]any{"name": "detail-vm", "namespace": "team-x"},
+			"status": map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+				"vm":         map[string]any{"name": "the-vm"},
+			},
+		},
+	}
+	vm.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
+	})
+	s := newTestServer(t, vm)
+
+	t.Run("found, served from cache", func(t *testing.T) {
+		resp, err := s.GetResourceDetail(context.Background(), &resourceservice.ResourceDetailRequest{
+			Kind: "HarvesterVM", Name: "detail-vm", Namespace: "team-x",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Name != "detail-vm" || !resp.Ready {
+			t.Errorf("unexpected detail: %+v", resp)
+		}
+		if !strings.Contains(resp.ConnectionDetails, "the-vm") {
+			t.Errorf("expected connection details to contain 'the-vm', got %q", resp.ConnectionDetails)
+		}
+	})
+
+	t.Run("missing resource returns NotFound", func(t *testing.T) {
+		_, err := s.GetResourceDetail(context.Background(), &resourceservice.ResourceDetailRequest{
+			Kind: "HarvesterVM", Name: "nope", Namespace: "team-x",
+		})
+		if st, _ := status.FromError(err); st.Code() != codes.NotFound {
+			t.Errorf("expected NotFound, got %v", st.Code())
+		}
+	})
+
+	t.Run("unsupported kind returns InvalidArgument", func(t *testing.T) {
+		_, err := s.GetResourceDetail(context.Background(), &resourceservice.ResourceDetailRequest{
+			Kind: "Nonexistent", Name: "x", Namespace: "y",
+		})
+		if st, _ := status.FromError(err); st.Code() != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument, got %v", st.Code())
+		}
+	})
+}
+
 func TestGetResourceStatus(t *testing.T) {
 	tests := []struct {
-		name       string
-		obj        map[string]any
-		wantMsg    string
-		wantReady  bool
+		name      string
+		obj       map[string]any
+		wantMsg   string
+		wantReady bool
 	}{
 		{
 			name:      "ready condition",
