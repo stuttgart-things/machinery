@@ -22,6 +22,9 @@ service = {
                 port: config.grpcPort
                 targetPort: "grpc"
                 protocol: "TCP"
+                # Tells the Gateway the backend speaks HTTP/2 cleartext, so
+                # gRPC is routed correctly once TLS is terminated at the edge.
+                appProtocol: "kubernetes.io/h2c"
             }
         ] + ([
             {
