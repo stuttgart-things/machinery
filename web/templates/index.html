@@ -53,6 +53,17 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
+        .ctl-btn {
+            padding: 0.15rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--surface);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.15s;
+        }
+        .ctl-btn:hover { border-color: var(--accent); color: var(--accent); }
         .filters {
             display: flex;
             gap: 0.5rem;
@@ -256,8 +267,10 @@
         <header>
             <h1><span>machinery</span> dashboard</h1>
             <div class="status-bar">
-                <div class="pulse"></div>
-                auto-refresh 5s
+                <div class="pulse" id="pulse"></div>
+                <span id="refresh-status">auto-refresh 5s</span>
+                <button class="ctl-btn" id="toggle-refresh" title="pause / resume auto-refresh">pause</button>
+                <button class="ctl-btn" id="refresh-now" title="refresh now">&#x21bb;</button>
                 <span class="htmx-indicator" id="spinner">loading...</span>
             </div>
         </header>
@@ -278,7 +291,7 @@
 
         <div id="resource-list"
              hx-get="/resources?kind=*"
-             hx-trigger="load, every 5s, filterChange"
+             hx-trigger="load"
              hx-sync="this:abort"
              hx-indicator="#spinner">
         </div>
@@ -297,6 +310,9 @@
         // "no filter" → server returns everything for that axis.
         const state = { kinds: new Set(), namespaces: new Set() };
 
+        const REFRESH_MS = 5000;
+        let refreshTimer = null;
+
         function buildURL() {
             const p = new URLSearchParams();
             p.set('kind', state.kinds.size ? [...state.kinds].join(',') : '*');
@@ -306,22 +322,41 @@
             return '/resources?' + p.toString();
         }
 
+        // refreshNow issues a request for the *current* filter selection
+        // and swaps it into #resource-list. Every refresh path — filter
+        // clicks, the manual button, the auto-refresh interval — goes
+        // through here, so a refresh can never silently drop the active
+        // filter. hx-sync="this:abort" on the target means a fresh
+        // request always wins over an in-flight poll.
         function refreshNow() {
-            const list = document.getElementById('resource-list');
-            const url = buildURL();
-            // Keep hx-get in sync so the every-5s poller picks up the
-            // new URL on its next tick.
-            list.setAttribute('hx-get', url);
-            // Drive the request directly. `htmx.trigger(elt, 'event')`
-            // dispatches a CustomEvent but live tests on
-            // machinery-pr-67 showed it doesn't reliably re-fire the
-            // request when combined with `every 5s` polling on the
-            // same element — clicks updated the active class but the
-            // table stayed on the previous response. `htmx.ajax` is
-            // unambiguous and still respects hx-sync="this:abort", so
-            // a stale poll can't overwrite the fresh response either.
-            htmx.ajax('GET', url, '#resource-list');
+            htmx.ajax('GET', buildURL(), '#resource-list');
         }
+
+        // Auto-refresh is a JS interval (not htmx `every 5s`) so it can
+        // be paused and so every tick goes through refreshNow() with the
+        // live filter — the htmx poller used a fixed hx-get and could
+        // revert the table to "all namespaces" (see #75).
+        function startAutoRefresh() {
+            if (refreshTimer) return;
+            refreshTimer = setInterval(refreshNow, REFRESH_MS);
+            document.getElementById('refresh-status').textContent = 'auto-refresh 5s';
+            document.getElementById('toggle-refresh').textContent = 'pause';
+            document.getElementById('pulse').style.animationPlayState = 'running';
+        }
+
+        function stopAutoRefresh() {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+            document.getElementById('refresh-status').textContent = 'paused';
+            document.getElementById('toggle-refresh').textContent = 'resume';
+            document.getElementById('pulse').style.animationPlayState = 'paused';
+        }
+
+        document.getElementById('toggle-refresh').addEventListener('click', () => {
+            if (refreshTimer) stopAutoRefresh();
+            else startAutoRefresh();
+        });
+        document.getElementById('refresh-now').addEventListener('click', refreshNow);
 
         function syncAllButton(rowId, set) {
             const allBtn = document.querySelector(`#${rowId} [data-value="*"]`);
@@ -330,7 +365,9 @@
             else allBtn.classList.remove('active');
         }
 
-        // Single delegated handler for both filter rows.
+        // Single delegated handler for both filter rows. A filter click
+        // is an explicit user action — it refreshes immediately, even
+        // while auto-refresh is paused.
         document.addEventListener('click', e => {
             const btn = e.target.closest('.filter-btn');
             if (!btn) return;
@@ -357,8 +394,7 @@
         });
 
         // Namespace chips are dynamic — re-derived from each /resources
-        // response. The chip row in the markup is a placeholder; this
-        // re-renders it on every swap, preserving the user's selection.
+        // response. The chip row in the markup is a placeholder.
         document.body.addEventListener('htmx:afterSwap', e => {
             if (e.target.id !== 'resource-list') return;
             const data = e.target.querySelector('#ns-data');
@@ -369,18 +405,24 @@
             renderNamespaceChips(namespaces);
         });
 
+        // renderNamespaceChips rebuilds the namespace row from the
+        // server's namespace list UNIONED with whatever the user has
+        // selected. The union is the fix for #75: a selected namespace
+        // always keeps a visible, deselectable chip and is never dropped
+        // from `state` — even if its resources momentarily vanish from a
+        // poll response. `state` is read here, never mutated. The kind
+        // row is static markup and is never rebuilt.
         function renderNamespaceChips(namespaces) {
             const row = document.getElementById('namespace-filters');
+            // '' = cluster-scoped resources; not a filterable chip.
+            const all = new Set(namespaces.filter(ns => ns !== ''));
+            for (const ns of state.namespaces) all.add(ns);
+            const filterable = [...all].sort();
+
             const html = ['<span class="filter-label">Namespace</span>'];
             html.push(
                 `<button class="filter-btn ns-filter ${state.namespaces.size === 0 ? 'active' : ''}" data-value="*">All</button>`
             );
-            // Cluster-scoped resources have namespace=""; the server
-            // emits them in the metadata array but they're not
-            // filterable here — there's no useful chip label for them
-            // and the namespace filter always lets them through (see
-            // handleResources). UI-side we just skip the empty entry.
-            const filterable = namespaces.filter(ns => ns !== '');
             if (filterable.length === 0) {
                 html.push('<span class="filter-empty">no namespaced resources to filter</span>');
             } else {
@@ -389,14 +431,10 @@
                     html.push(`<button class="filter-btn ns-filter ${active}" data-value="${ns}">${ns}</button>`);
                 }
             }
-            // Drop any selected namespaces that no longer exist in the
-            // new result set — keeps the URL clean and avoids zombie
-            // filters that would silently empty the table.
-            for (const ns of [...state.namespaces]) {
-                if (!namespaces.includes(ns)) state.namespaces.delete(ns);
-            }
             row.innerHTML = html.join('');
         }
+
+        startAutoRefresh();
     </script>
 </body>
 </html>
