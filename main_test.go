@@ -280,7 +280,14 @@ func TestGetResources_CountLimit(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(resp.Resources) != 2 {
-		t.Errorf("expected 2 resources (count limit), got %d", len(resp.Resources))
+		t.Fatalf("expected 2 resources (count limit), got %d", len(resp.Resources))
+	}
+	// The cap is applied after the sort, so it is a deterministic
+	// top-N — the first two by (kind, namespace, name), not an
+	// arbitrary subset of the informer store's iteration order.
+	if resp.Resources[0].Name != "vm-0" || resp.Resources[1].Name != "vm-1" {
+		t.Errorf("expected the sorted top-2 [vm-0 vm-1], got [%s %s]",
+			resp.Resources[0].Name, resp.Resources[1].Name)
 	}
 }
 
