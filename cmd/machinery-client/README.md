@@ -50,7 +50,7 @@ Connection flags accepted on **every** subcommand:
 ```bash
 kubectl -n machinery port-forward svc/machinery 50051:50051 &
 
-machinery-client list  --kind=VsphereVMAnsible --count=10
+machinery-client list  --kind=VsphereVMAnsible          # all of them; --count=N to cap
 machinery-client get   --kind=VsphereVMAnsible --name=demo-vm --namespace=demo
 machinery-client watch --kind='*'
 machinery-client health
@@ -63,21 +63,39 @@ or `export MACHINERY_AUTH_TOKEN=…`.
 
 Once the [GRPCRoute is applied](../../kcl/grpcroute.k), machinery is
 addressable at the hostname the gateway listener exposes — e.g.
-`machinery.example.com:443` for a TLS listener.
+`machinery-grpc.example.com:443` for a TLS listener. Set the connection
+once via the environment, then every command is a one-liner:
 
 ```bash
-export MACHINERY_SERVER=machinery.example.com:443
-export MACHINERY_AUTH_TOKEN=$(kubectl -n machinery get secret machinery-auth -o jsonpath='{.data.token}' | base64 -d)
+export MACHINERY_SERVER=machinery-grpc.example.com:443
+export MACHINERY_INSECURE=false          # TLS, not plaintext, on :443
+export MACHINERY_TLS_SKIP_VERIFY=true    # gateway cert is from an internal CA
+export MACHINERY_AUTH_TOKEN=<bearer-token>
 
-machinery-client list  --insecure=false --kind='*' --count=20
-machinery-client watch --insecure=false --kind='*'
+machinery-client list  --kind='*'
+machinery-client get   --kind=Certificate --name=cluster-ca --namespace=cert-manager
+machinery-client watch --kind='*'
+machinery-client health
 ```
 
-Off-cluster gRPC over a TLS `:443` listener needs HTTP/2 ALPN on the
-Gateway — see [`kcl/README.md`](../../kcl/README.md). Use
-`--ca-cert=/path/to/ca.pem` for a private CA, or `--tls-skip-verify`
-for a quick smoke test. The bearer token is sent over TLS only by
-default; pass `--insecure` to also send it on a plaintext LAN dial.
+Every connection flag has a `MACHINERY_*` env var (see the table above),
+so a session like the one above needs no repeated flags. Concretely,
+against a preview env:
+
+```bash
+export MACHINERY_SERVER=machinery-pr-123-grpc.homerun2-dev.sthings-vsphere.labul.sva.de:443
+export MACHINERY_INSECURE=false
+export MACHINERY_TLS_SKIP_VERIFY=true
+export MACHINERY_AUTH_TOKEN=machinery-preview-grpc-token
+machinery-client list --kind='*'
+```
+
+Prefer verifying the chain: drop `MACHINERY_TLS_SKIP_VERIFY` and set
+`MACHINERY_CA_CERT=/path/to/ca.pem` with the gateway's CA bundle.
+Off-cluster gRPC over a TLS `:443` listener also needs HTTP/2 ALPN on
+the Gateway — see [`kcl/README.md`](../../kcl/README.md). The bearer
+token is sent over TLS only by default; set `MACHINERY_INSECURE=true`
+to also send it on a plaintext LAN dial.
 
 ### `watch`
 
