@@ -320,22 +320,17 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 		}
 		rk := s.config.Resources[kind]
 		for _, obj := range objs {
-			if req.Count == 0 {
-				break
-			}
 			item, ok := obj.(*unstructured.Unstructured)
 			if !ok {
 				continue
 			}
 			allResources = append(allResources, toResourceStatus(item, kind, rk))
-			if req.Count > 0 {
-				req.Count--
-			}
 		}
 	}
 
 	// Informer stores are unordered; sort for a stable response so the
-	// dashboard rows don't shuffle between polls.
+	// dashboard rows don't shuffle between polls — and so a count limit
+	// returns a predictable top-N, not an arbitrary subset.
 	sort.Slice(allResources, func(i, j int) bool {
 		a, b := allResources[i], allResources[j]
 		if a.Kind != b.Kind {
@@ -346,6 +341,12 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 		}
 		return a.Name < b.Name
 	})
+
+	// Cap to req.Count after sorting (count<0 means "all"). Applying it
+	// here, not during iteration, keeps the limited set deterministic.
+	if req.Count >= 0 && len(allResources) > int(req.Count) {
+		allResources = allResources[:int(req.Count)]
+	}
 
 	slog.Info("resources fetched", "count", len(allResources))
 	return &resourceservice.ResourceListResponse{Resources: allResources}, nil

@@ -124,7 +124,7 @@ func runList(args []string) int {
 	var c commonFlags
 	registerCommon(fs, &c)
 	kind := fs.String("kind", "*", "kind to fetch (* for every configured kind)")
-	count := fs.Int("count", 5, "max resources to return (-1 = all)")
+	count := fs.Int("count", -1, "max resources to return (-1 = all)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
