@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/stuttgart-things/machinery/compare/v1.13.0...v1.13.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* **web:** preserve filter selection across dashboard auto-refresh ([#81](https://github.com/stuttgart-things/machinery/issues/81)) ([be64494](https://github.com/stuttgart-things/machinery/commit/be6449432933354bffc6bef07aa6e3751dbb4534))
+
 # [1.13.0](https://github.com/stuttgart-things/machinery/compare/v1.12.0...v1.13.0) (2026-05-22)
 
 
