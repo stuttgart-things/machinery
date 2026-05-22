@@ -1,3 +1,10 @@
+## [1.13.2](https://github.com/stuttgart-things/machinery/compare/v1.13.1...v1.13.2) (2026-05-22)
+
+
+### Bug Fixes
+
+* **cmd:** machinery-client list shows all resources by default ([#82](https://github.com/stuttgart-things/machinery/issues/82)) ([2960ff0](https://github.com/stuttgart-things/machinery/commit/2960ff011695923939edbe6c4b9fefd56c94a304))
+
 ## [1.13.1](https://github.com/stuttgart-things/machinery/compare/v1.13.0...v1.13.1) (2026-05-22)
 
 
