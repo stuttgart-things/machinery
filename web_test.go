@@ -37,11 +37,19 @@ func TestWebIndex(t *testing.T) {
 		`data-value="*"`,
 		// Stale-response guard for the auto-refresh poll.
 		`hx-sync="this:abort"`,
-		`filterChange`,
+		// Pause / manual-refresh controls (#75).
+		`id="toggle-refresh"`,
+		`id="refresh-now"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in index body", want)
 		}
+	}
+	// #75: the declarative htmx poller was replaced by a JS interval so
+	// every tick carries the live filter — the fixed-URL `every 5s`
+	// trigger must be gone.
+	if strings.Contains(body, "every 5s") {
+		t.Error("index still has the htmx `every 5s` poller; expected JS-driven refresh")
 	}
 }
 
