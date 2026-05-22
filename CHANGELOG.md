@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/stuttgart-things/machinery/compare/v1.12.0...v1.13.0) (2026-05-22)
+
+
+### Features
+
+* **cmd:** release machinery-client as a versioned CLI binary ([#80](https://github.com/stuttgart-things/machinery/issues/80)) ([04b4acb](https://github.com/stuttgart-things/machinery/commit/04b4acb07bf0cea7ba2772092e0fa5f9dd5208b0))
+
 # [1.12.0](https://github.com/stuttgart-things/machinery/compare/v1.11.0...v1.12.0) (2026-05-21)
 
 
