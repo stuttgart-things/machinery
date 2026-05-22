@@ -1,10 +1,7 @@
-// Command consumer is an example client for the machinery gRPC service.
-// It demonstrates the two RPCs (GetResources / GetResourceDetail), the
-// health probe, and the connection plumbing (plaintext, TLS with a custom
-// CA, bearer-token auth) downstream consumers are expected to wire up.
-//
-// It is deliberately a single file so the relevant snippets (dial,
-// bearerToken, error handling) can be copied into another service.
+// Command machinery-client is the CLI for the machinery gRPC service:
+// list and inspect resource status, watch live changes, and probe
+// health. It handles the connection plumbing (plaintext, TLS with a
+// custom CA, bearer-token auth) downstream consumers need.
 package main
 
 import (
@@ -15,28 +12,34 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 )
 
-const usage = `consumer — example client for the machinery gRPC service.
+const usage = `machinery-client — CLI for the machinery gRPC service.
 
 Usage:
-  consumer <command> [flags]
+  machinery-client <command> [flags]
 
 Commands:
-  list      Call GetResources (machinery's "browse" endpoint)
+  list      Call GetResources (browse resource status)
   get       Call GetResourceDetail (single CR with info fields)
+  watch     Stream live resource changes (WatchResources)
   health    Call grpc.health.v1.Health/Check (does the route answer?)
+  version   Print build version and exit
 
 Connection flags (accepted on every subcommand):
   --server            host:port               (env MACHINERY_SERVER, default localhost:50051)
@@ -44,10 +47,11 @@ Connection flags (accepted on every subcommand):
   --ca-cert           PEM CA bundle for TLS   (env MACHINERY_CA_CERT)
   --tls-skip-verify   skip TLS verify (dev)   (env MACHINERY_TLS_SKIP_VERIFY)
   --token             bearer token            (env MACHINERY_AUTH_TOKEN)
-  --timeout           per-RPC timeout         (default 10s)
+  --token-file        file holding the token  (env MACHINERY_AUTH_TOKEN_FILE)
+  --timeout           per-RPC timeout         (default 10s; ignored by watch)
   --json              emit JSON, not a table
 
-Run "consumer <command> --help" for command-specific flags.
+Run "machinery-client <command> --help" for command-specific flags.
 `
 
 func main() {
@@ -60,8 +64,12 @@ func main() {
 		os.Exit(runList(os.Args[2:]))
 	case "get":
 		os.Exit(runGet(os.Args[2:]))
+	case "watch":
+		os.Exit(runWatch(os.Args[2:]))
 	case "health":
 		os.Exit(runHealth(os.Args[2:]))
+	case "version", "-v", "--version":
+		fmt.Printf("machinery-client %s (commit %s, built %s)\n", version, commit, date)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -78,6 +86,7 @@ type commonFlags struct {
 	caCert        string
 	tlsSkipVerify bool
 	token         string
+	tokenFile     string
 	timeout       time.Duration
 	asJSON        bool
 }
@@ -88,8 +97,26 @@ func registerCommon(fs *flag.FlagSet, c *commonFlags) {
 	fs.StringVar(&c.caCert, "ca-cert", os.Getenv("MACHINERY_CA_CERT"), "path to PEM CA bundle (TLS only)")
 	fs.BoolVar(&c.tlsSkipVerify, "tls-skip-verify", envBool("MACHINERY_TLS_SKIP_VERIFY", false), "skip TLS verification (dev only)")
 	fs.StringVar(&c.token, "token", os.Getenv("MACHINERY_AUTH_TOKEN"), "bearer token; sent as `authorization: Bearer <token>` (pairs with auth interceptor)")
+	fs.StringVar(&c.tokenFile, "token-file", os.Getenv("MACHINERY_AUTH_TOKEN_FILE"), "file holding the bearer token (mirrors the server's auth.tokenFile; --token wins)")
 	fs.DurationVar(&c.timeout, "timeout", 10*time.Second, "per-RPC timeout")
 	fs.BoolVar(&c.asJSON, "json", false, "emit JSON instead of a human-readable table")
+}
+
+// effectiveToken resolves the bearer token: an inline --token wins,
+// otherwise the trimmed contents of --token-file, otherwise empty (no
+// authorization metadata is attached).
+func effectiveToken(c commonFlags) (string, error) {
+	if c.token != "" {
+		return c.token, nil
+	}
+	if c.tokenFile != "" {
+		b, err := os.ReadFile(c.tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("reading --token-file: %w", err)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return "", nil
 }
 
 func runList(args []string) int {
@@ -194,6 +221,68 @@ func runHealth(args []string) int {
 	return 0
 }
 
+func runWatch(args []string) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	var c commonFlags
+	registerCommon(fs, &c)
+	kind := fs.String("kind", "*", "kind(s) to watch, comma-separated (* = every configured kind)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	conn, err := dial(c)
+	if err != nil {
+		return fail(err)
+	}
+	defer conn.Close()
+
+	// A watch is long-lived: cancel on Ctrl-C / SIGTERM rather than the
+	// per-RPC --timeout, which would cut a healthy stream off.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	stream, err := resourceservice.NewResourceServiceClient(conn).WatchResources(ctx,
+		&resourceservice.ResourceRequest{Kind: *kind})
+	if err != nil {
+		return fail(err)
+	}
+
+	for {
+		ev, err := stream.Recv()
+		if err != nil {
+			// EOF / Canceled / a cancelled context are the expected
+			// ways a watch ends — exit cleanly, not as an error.
+			if errors.Is(err, io.EOF) || status.Code(err) == codes.Canceled || ctx.Err() != nil {
+				return 0
+			}
+			return fail(err)
+		}
+		if c.asJSON {
+			if code := emitJSON(ev); code != 0 {
+				return code
+			}
+			continue
+		}
+		printEvent(ev)
+	}
+}
+
+// printEvent renders one watch event as a single line, e.g.
+//
+//	MODIFIED  Certificate  cert-manager/cluster-ca  Ready
+func printEvent(ev *resourceservice.ResourceEvent) {
+	r := ev.GetResource()
+	loc := r.GetName()
+	if ns := r.GetNamespace(); ns != "" {
+		loc = ns + "/" + loc
+	}
+	st := r.GetStatusMessage()
+	if st == "" {
+		st = boolStr(r.GetReady())
+	}
+	fmt.Printf("%-9s %-16s %-44s %s\n", ev.GetType().String(), r.GetKind(), loc, st)
+}
+
 // dial wires up TLS + optional bearer-token auth and returns a connection.
 func dial(c commonFlags) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption
@@ -219,8 +308,12 @@ func dial(c commonFlags) (*grpc.ClientConn, error) {
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	}
 
-	if c.token != "" {
-		opts = append(opts, grpc.WithPerRPCCredentials(bearerToken{token: c.token, insecure: c.insecure}))
+	token, err := effectiveToken(c)
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(bearerToken{token: token, insecure: c.insecure}))
 	}
 
 	return grpc.NewClient(c.server, opts...)
