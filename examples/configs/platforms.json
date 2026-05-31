@@ -41,14 +41,20 @@
       "group": "resources.stuttgart-things.com",
       "version": "v1alpha1",
       "resource": "ansibleruns",
-      "connectionField": "status.lastRunTime",
+      "connectionField": "status.pipelineRunName",
       "statusFields": [
-        "status.phase",
-        "status.observedGeneration"
+        "status.succeeded",
+        "status.installed",
+        "status.reason"
       ],
       "infoFields": [
-        { "label": "Playbook", "path": "spec.playbook" },
-        { "label": "Inventory","path": "spec.inventory" }
+        { "label": "Playbooks",  "path": "spec.ansiblePlaybooks" },
+        { "label": "Target",     "path": "spec.ansibleTargetHost" },
+        { "label": "Namespace",  "path": "spec.namespace" },
+        { "label": "GitRepo",    "path": "spec.gitRepoUrl" },
+        { "label": "Message",    "path": "status.message" },
+        { "label": "Started",    "path": "status.startTime" },
+        { "label": "Completed",  "path": "status.completionTime" }
       ]
     }
   }
