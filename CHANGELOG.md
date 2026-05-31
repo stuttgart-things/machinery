@@ -1,3 +1,10 @@
+## [1.13.3](https://github.com/stuttgart-things/machinery/compare/v1.13.2...v1.13.3) (2026-05-31)
+
+
+### Bug Fixes
+
+* **configs:** correct AnsibleRun field paths in platforms.json example ([#84](https://github.com/stuttgart-things/machinery/issues/84)) ([70e4305](https://github.com/stuttgart-things/machinery/commit/70e4305a086f236f0df910fcad3512569cf48fbd))
+
 ## [1.13.2](https://github.com/stuttgart-things/machinery/compare/v1.13.1...v1.13.2) (2026-05-22)
 
 
