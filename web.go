@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
+	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 )
 
 //go:embed web/templates/*.html

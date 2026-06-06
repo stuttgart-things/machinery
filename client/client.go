@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 
-	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
+	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
