@@ -1,4 +1,4 @@
-module github.com/stuttgart-things/maschinist
+module github.com/stuttgart-things/machinery
 
 go 1.26.0
 

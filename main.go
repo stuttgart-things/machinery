@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	resourceservice "github.com/stuttgart-things/maschinist/resourceservice"
+	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
