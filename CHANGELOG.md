@@ -1,3 +1,10 @@
+## [1.13.4](https://github.com/stuttgart-things/machinery/compare/v1.13.3...v1.13.4) (2026-06-06)
+
+
+### Bug Fixes
+
+* rename Go module path to github.com/stuttgart-things/machinery ([#85](https://github.com/stuttgart-things/machinery/issues/85)) ([b83dcc3](https://github.com/stuttgart-things/machinery/commit/b83dcc37a3bd6f47cc3a4eb8442f4e27f94a5cbd))
+
 ## [1.13.3](https://github.com/stuttgart-things/machinery/compare/v1.13.2...v1.13.3) (2026-05-31)
 
 
