@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	google.golang.org/grpc v1.81.1
-	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
+	google.golang.org/protobuf v1.36.12-0.20260810132945-cdd4c5f7406e
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
 )
