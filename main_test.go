@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,7 +41,8 @@ func buildTestServer(t *testing.T, dc *dynamicfake.FakeDynamicClient, cfg *Confi
 	t.Helper()
 	stopCh := make(chan struct{})
 	t.Cleanup(func() { close(stopCh) })
-	return &server{config: cfg, informers: startInformers(dc, cfg, stopCh)}
+	infs, _, _ := startInformers(dc, cfg, stopCh)
+	return &server{config: cfg, informers: infs}
 }
 
 // fakeClientWithMissingKind builds a fake dynamic client that knows the
@@ -681,4 +683,78 @@ func TestWatchResources_LiveEvents(t *testing.T) {
 
 	cancel()
 	<-errCh
+}
+
+// TestRetryUnservedKinds_AttachesLateKind is the regression test for
+// stuttgart-things/clusterbook#186: a kind whose CRD does not exist when
+// the process starts used to be dropped for the lifetime of the pod, so
+// a dashboard on a freshly built cluster stayed empty until somebody
+// restarted it by hand.
+//
+// The fake client returns NotFound for the kind until the reactor is
+// flipped, which is exactly what the API server does between pod start
+// and Crossplane establishing the XRD.
+func TestRetryUnservedKinds_AttachesLateKind(t *testing.T) {
+	late := schema.GroupVersionResource{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Resource: "latevms",
+	}
+
+	var served atomic.Bool
+	scheme := runtime.NewScheme()
+	kinds := map[schema.GroupVersionResource]string{}
+	for k, v := range testListKinds {
+		kinds[k] = v
+	}
+	kinds[late] = "LateVMList"
+	dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kinds)
+	dc.PrependReactor("list", late.Resource, func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if served.Load() {
+			return false, nil, nil // fall through to the tracker
+		}
+		return true, nil, apierrors.NewNotFound(
+			schema.GroupResource{Group: late.Group, Resource: late.Resource}, "")
+	})
+
+	cfg := defaultConfig()
+	cfg.Resources = map[string]ResourceKind{
+		"LateVM": {Group: late.Group, Version: late.Version, Resource: late.Resource},
+	}
+
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { close(stopCh) })
+
+	infs, factory, unserved := startInformers(dc, cfg, stopCh)
+	if len(infs) != 0 {
+		t.Fatalf("expected no informer while the kind is NotFound, got %d", len(infs))
+	}
+	if len(unserved) != 1 || unserved[0] != "LateVM" {
+		t.Fatalf("expected LateVM to be reported unserved, got %v", unserved)
+	}
+
+	srv := &server{config: cfg, informers: infs}
+	if _, ok := srv.informer("LateVM"); ok {
+		t.Fatal("informer present before the kind is served")
+	}
+
+	// Shorten the retry so the test does not wait 30s for a tick.
+	orig := informerRetryInterval
+	informerRetryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { informerRetryInterval = orig })
+
+	go retryUnservedKinds(dc, srv, factory, unserved, stopCh)
+
+	// The CRD "appears".
+	served.Store(true)
+
+	deadline := time.After(10 * time.Second)
+	for {
+		if _, ok := srv.informer("LateVM"); ok {
+			return // recovered without a restart — the point of the fix
+		}
+		select {
+		case <-deadline:
+			t.Fatal("informer for LateVM never attached after the kind became served")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }

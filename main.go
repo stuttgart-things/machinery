@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -47,6 +48,16 @@ var (
 // long-lived WatchResources streams a periodic self-heal.
 const informerResync = 10 * time.Minute
 
+// informerRetryInterval is how often a kind the cluster did not serve
+// at startup is probed again. A machinery cluster installs its
+// Configurations through Crossplane, so the XRD CRDs appear seconds to
+// minutes AFTER this process starts -- see
+// stuttgart-things/clusterbook#186, where the pod came up 31s before the
+// first CRD and served an empty table until it was restarted by hand.
+//
+// A var, not a const, so tests can shorten it; nothing else writes it.
+var informerRetryInterval = 30 * time.Second
+
 // watchBufferSize bounds the per-stream event backlog. A client that
 // falls more than this many events behind gets ResourceExhausted and
 // is expected to reconnect (which replays a fresh snapshot).
@@ -55,11 +66,33 @@ const watchBufferSize = 256
 type server struct {
 	resourceservice.UnimplementedResourceServiceServer
 	config *Config
+	// mu guards informers. It is written by retryUnservedKinds long
+	// after startup, so every read goes through informer().
+	mu sync.RWMutex
 	// informers holds one shared informer per configured kind the
 	// cluster serves. Reads use the informer's Lister (cache, no API
 	// call); WatchResources attaches event handlers. A kind absent here
-	// was not served at startup. Populated by startInformers.
+	// is not served by the cluster YET -- retryUnservedKinds keeps
+	// probing and adds it when its CRD appears. Populated by
+	// startInformers.
 	informers map[string]informers.GenericInformer
+}
+
+// informer returns the informer for kind, if the cluster serves it.
+func (s *server) informer(kind string) (informers.GenericInformer, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	inf, ok := s.informers[kind]
+	return inf, ok
+}
+
+// addInformer publishes a late-arriving kind. Its cache must already be
+// synced -- a Lister over an unsynced informer answers empty, which is
+// the very failure this whole path exists to avoid.
+func (s *server) addInformer(kind string, inf informers.GenericInformer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.informers[kind] = inf
 }
 
 func main() {
@@ -101,7 +134,7 @@ func main() {
 	// This blocks until the caches warm, so the gRPC/HTTP servers below
 	// only start serving once reads can be answered from cache.
 	stopCh := make(chan struct{})
-	infs := startInformers(dynamicClient, cfg, stopCh)
+	infs, informerFactory, unservedKinds := startInformers(dynamicClient, cfg, stopCh)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	lis, err := net.Listen("tcp", addr)
@@ -111,6 +144,12 @@ func main() {
 	}
 
 	srv := &server{config: cfg, informers: infs}
+
+	// Kinds the cluster did not serve yet are not given up on: Crossplane
+	// creates the XRD CRDs after this pod starts, and a one-shot discovery
+	// left the dashboard permanently empty on a freshly built cluster
+	// (stuttgart-things/clusterbook#186).
+	go retryUnservedKinds(dynamicClient, srv, informerFactory, unservedKinds, stopCh)
 
 	// Keepalive keeps long-lived WatchResources streams alive through
 	// idle timeouts on the gateway/proxy in front of the server.
@@ -195,12 +234,19 @@ func main() {
 // retired) are skipped with a warning — one missing kind must not
 // stop the others, the same tolerance the old per-request List path
 // had. The informers run until stopCh is closed.
-func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) map[string]informers.GenericInformer {
+//
+// It also returns the shared factory and the kinds that were NOT served,
+// so retryUnservedKinds can pick them up later. Not being served is
+// usually TEMPORARY: on a machinery cluster the XRD CRDs are created by
+// Crossplane seconds to minutes after this process starts.
+func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) (
+	map[string]informers.GenericInformer, dynamicinformer.DynamicSharedInformerFactory, []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	factory := dynamicinformer.NewDynamicSharedInformerFactory(dc, informerResync)
 	infs := make(map[string]informers.GenericInformer, len(cfg.Resources))
+	var unserved []string
 
 	for kind, rk := range cfg.Resources {
 		gvr := rk.toGVR()
@@ -209,8 +255,9 @@ func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) m
 		// informer whose reflector would otherwise retry-spam forever.
 		if _, err := dc.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
 			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-				slog.Warn("kind not served by cluster, skipping",
-					"kind", kind, "gvr", gvr.String())
+				slog.Warn("kind not served by cluster yet, will retry",
+					"kind", kind, "gvr", gvr.String(), "retryIn", informerRetryInterval)
+				unserved = append(unserved, kind)
 				continue
 			}
 			// Other errors (RBAC, transient API hiccup) — attach the
@@ -223,8 +270,12 @@ func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) m
 	}
 
 	if len(infs) == 0 {
-		slog.Warn("no configured kinds are served by the cluster; resource queries will be empty")
-		return infs
+		// Not fatal and not permanent: this is the normal state of a
+		// freshly built cluster whose Crossplane packages are still
+		// installing. retryUnservedKinds will attach them.
+		slog.Warn("no configured kinds are served by the cluster yet; resource queries are empty until they appear",
+			"unserved", len(unserved), "retryIn", informerRetryInterval)
+		return infs, factory, unserved
 	}
 
 	factory.Start(stopCh)
@@ -235,8 +286,87 @@ func startInformers(dc dynamic.Interface, cfg *Config, stopCh <-chan struct{}) m
 				"type", typ.String())
 		}
 	}
-	slog.Info("informer caches ready", "kinds", len(infs))
-	return infs
+	slog.Info("informer caches ready", "kinds", len(infs), "unserved", len(unserved))
+	return infs, factory, unserved
+}
+
+// retryUnservedKinds re-probes the kinds the cluster did not serve at
+// startup and attaches an informer as soon as one appears, so the
+// process recovers on its own instead of needing a restart.
+//
+// It exists because discovery used to be a one-shot: a kind that was
+// merely LATE — the normal case, since Crossplane creates the XRD CRDs
+// after this pod is scheduled — was dropped exactly like a kind that had
+// been retired, and every later request answered from an informer map
+// that would never gain it. The asymmetry was the bug: any OTHER probe
+// error already attached the informer and let its reflector recover.
+//
+// Runs until every pending kind is attached or stopCh closes.
+func retryUnservedKinds(
+	dc dynamic.Interface,
+	srv *server,
+	factory dynamicinformer.DynamicSharedInformerFactory,
+	pending []string,
+	stopCh <-chan struct{},
+) {
+	if len(pending) == 0 {
+		return
+	}
+	ticker := time.NewTicker(informerRetryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+		}
+
+		var still []string
+		for _, kind := range pending {
+			rk, ok := srv.config.Resources[kind]
+			if !ok {
+				continue // config changed under us; drop it
+			}
+			gvr := rk.toGVR()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := dc.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1})
+			cancel()
+			if err != nil && (apierrors.IsNotFound(err) || meta.IsNoMatchError(err)) {
+				still = append(still, kind)
+				continue
+			}
+			// Served now, or failing for a reason a reflector can retry
+			// through (RBAC, API hiccup) — same tolerance as startup.
+			if err != nil {
+				slog.Warn("kind probe failed on retry, attaching informer anyway",
+					"kind", kind, "gvr", gvr.String(), "error", err)
+			}
+			inf := factory.ForResource(gvr)
+			// Start is additive: it starts informers the factory has not
+			// started yet and leaves the running ones alone.
+			factory.Start(stopCh)
+
+			syncCtx, syncCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			synced := cache.WaitForCacheSync(syncCtx.Done(), inf.Informer().HasSynced)
+			syncCancel()
+			if !synced {
+				// Publishing an unsynced informer would answer empty
+				// from its Lister, which is the failure this replaces.
+				slog.Warn("late kind did not sync in time, retrying", "kind", kind)
+				still = append(still, kind)
+				continue
+			}
+			srv.addInformer(kind, inf)
+			slog.Info("kind became available, informer attached", "kind", kind, "gvr", gvr.String())
+		}
+
+		pending = still
+		if len(pending) == 0 {
+			slog.Info("all configured kinds are served; stopping discovery retry")
+			return
+		}
+	}
 }
 
 // resolveKinds expands "" / "*" to every configured kind and validates
@@ -306,11 +436,13 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 
 	var allResources []*resourceservice.ResourceStatus
 	for _, kind := range kinds {
-		inf, ok := s.informers[kind]
+		inf, ok := s.informer(kind)
 		if !ok {
-			// No informer for this kind — the cluster did not serve it
-			// at startup (CRD removed, API version retired). Skip, as
-			// the old per-request List path did on IsNotFound/NoMatch.
+			// No informer for this kind — the cluster does not serve
+			// it (CRD absent, API version retired). Skip, as the old
+			// per-request List path did on IsNotFound/NoMatch.
+			// retryUnservedKinds is probing it; if its CRD appears the
+			// next request will find it.
 			slog.Warn("kind has no informer cache, skipping", "kind", kind)
 			continue
 		}
@@ -456,9 +588,10 @@ func (s *server) GetResourceDetail(ctx context.Context, req *resourceservice.Res
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported kind %q", req.Kind)
 	}
 
-	inf, ok := s.informers[req.Kind]
+	inf, ok := s.informer(req.Kind)
 	if !ok {
-		return nil, status.Errorf(codes.Unavailable, "kind %q is not served by the cluster", req.Kind)
+		return nil, status.Errorf(codes.Unavailable,
+			"kind %q is not served by the cluster (yet); retrying every %s", req.Kind, informerRetryInterval)
 	}
 	lister := inf.Lister()
 
@@ -503,7 +636,7 @@ func (s *server) WatchResources(req *resourceservice.ResourceRequest, stream res
 
 	var registered []string
 	for _, kind := range kinds {
-		inf, ok := s.informers[kind]
+		inf, ok := s.informer(kind)
 		if !ok {
 			slog.Warn("watch: kind has no informer cache, skipping", "kind", kind)
 			continue
