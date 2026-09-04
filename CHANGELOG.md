@@ -1,3 +1,10 @@
+## [1.13.5](https://github.com/stuttgart-things/machinery/compare/v1.13.4...v1.13.5) (2026-09-04)
+
+
+### Bug Fixes
+
+* retry kinds the cluster does not serve yet instead of dropping them ([#95](https://github.com/stuttgart-things/machinery/issues/95)) ([f009da4](https://github.com/stuttgart-things/machinery/commit/f009da4231805aa25541c87436686532a45adcb0)), closes [stuttgart-things/clusterbook#186](https://github.com/stuttgart-things/clusterbook/issues/186)
+
 ## [1.13.4](https://github.com/stuttgart-things/machinery/compare/v1.13.3...v1.13.4) (2026-06-06)
 
 
