@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/stuttgart-things/machinery/compare/v1.13.5...v1.14.0) (2026-10-01)
+
+
+### Features
+
+* **resourceservice:** conditions, generation and creationTimestamp in ResourceStatus ([#97](https://github.com/stuttgart-things/machinery/issues/97)) ([4880b20](https://github.com/stuttgart-things/machinery/commit/4880b200d1c91d1c3c1c256a1b7be0db40a16d0c)), closes [#96](https://github.com/stuttgart-things/machinery/issues/96)
+
 ## [1.13.5](https://github.com/stuttgart-things/machinery/compare/v1.13.4...v1.13.5) (2026-09-04)
 
 
