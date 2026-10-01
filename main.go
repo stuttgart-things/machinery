@@ -14,6 +14,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 
@@ -410,14 +411,119 @@ func toResourceStatus(item *unstructured.Unstructured, kind string, rk ResourceK
 		}
 	}
 	return &resourceservice.ResourceStatus{
-		Name:              item.GetName(),
-		Kind:              kind,
-		Ready:             ready,
-		StatusMessage:     statusMessage,
-		ConnectionDetails: connDetails,
-		Namespace:         item.GetNamespace(),
-		InfoFields:        getInfoFields(item, rk.InfoFields),
+		Name:               item.GetName(),
+		Kind:               kind,
+		Ready:              ready,
+		StatusMessage:      statusMessage,
+		ConnectionDetails:  connDetails,
+		Namespace:          item.GetNamespace(),
+		InfoFields:         getInfoFields(item, rk.InfoFields),
+		Conditions:         getConditions(item),
+		Generation:         toInt64(item.Object["metadata"], "generation"),
+		ObservedGeneration: toInt64(item.Object["status"], "observedGeneration"),
+		CreationTimestamp:  getCreationTimestamp(item),
 	}
+}
+
+// maxConditionMessageBytes caps Condition.message. Crossplane messages
+// can embed whole error chains; the cap keeps responses and the watch
+// stream bounded. Truncated messages end in conditionTruncationMarker
+// and never exceed the cap in total.
+const (
+	maxConditionMessageBytes  = 1024
+	conditionTruncationMarker = "…"
+)
+
+// getConditions maps status.conditions into Condition messages in their
+// original order. Only status.conditions is read: Gateway-API per-parent
+// conditions (status.parents[*].conditions) stay out of it and remain
+// aggregated in ready/status_message. Malformed entries (non-map items)
+// are skipped; non-string fields are left empty.
+func getConditions(obj *unstructured.Unstructured) []*resourceservice.Condition {
+	st, ok := obj.Object["status"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := st["conditions"].([]any)
+	if !ok {
+		return nil
+	}
+	conds := make([]*resourceservice.Condition, 0, len(raw))
+	for _, c := range raw {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		str := func(key string) string {
+			s, _ := cm[key].(string)
+			return s
+		}
+		conds = append(conds, &resourceservice.Condition{
+			Type:               str("type"),
+			Status:             str("status"),
+			Reason:             str("reason"),
+			Message:            truncateMessage(str("message"), maxConditionMessageBytes),
+			LastTransitionTime: str("lastTransitionTime"),
+		})
+	}
+	return conds
+}
+
+// truncateMessage shortens msg to at most maxBytes bytes (marker
+// included), cutting on a UTF-8 rune boundary.
+func truncateMessage(msg string, maxBytes int) string {
+	if len(msg) <= maxBytes {
+		return msg
+	}
+	cut := maxBytes - len(conditionTruncationMarker)
+	if cut < 0 {
+		cut = 0
+	}
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut] + conditionTruncationMarker
+}
+
+// toInt64 reads an integer field from a map-typed value, tolerating the
+// numeric types unstructured objects carry (int64 from the API decoder,
+// int/float64 from hand-built or JSON-decoded objects). Anything else,
+// including a missing field, yields 0.
+func toInt64(m any, key string) int64 {
+	mm, ok := m.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch v := mm[key].(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case int32:
+		return int64(v)
+	case float64:
+		return int64(v)
+	default:
+		return 0
+	}
+}
+
+// getCreationTimestamp returns metadata.creationTimestamp as RFC 3339
+// (UTC), or "" when unset or unparsable.
+func getCreationTimestamp(obj *unstructured.Unstructured) string {
+	md, ok := obj.Object["metadata"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	s, ok := md["creationTimestamp"].(string)
+	if !ok || s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (s *server) GetResources(ctx context.Context, req *resourceservice.ResourceRequest) (*resourceservice.ResourceListResponse, error) {

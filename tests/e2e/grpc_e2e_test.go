@@ -69,6 +69,29 @@ func TestE2E_GetResources_HarvesterVM(t *testing.T) {
 	if pending.Ready {
 		t.Errorf("e2e-vm-pending should be Ready=false, got %+v", pending)
 	}
+
+	// Conditions come through verbatim and in order (patched by
+	// tests/e2e/scripts/up.sh: Synced first, then Ready).
+	want := []*resourceservice.Condition{
+		{Type: "Synced", Status: "True", Reason: "ReconcileSuccess", LastTransitionTime: "2026-01-01T00:00:00Z"},
+		{Type: "Ready", Status: "False", Reason: "E2E", Message: "not ready", LastTransitionTime: "2026-01-01T00:00:00Z"},
+	}
+	if len(pending.Conditions) != len(want) {
+		t.Fatalf("e2e-vm-pending: want %d conditions, got %+v", len(want), pending.Conditions)
+	}
+	for i, w := range want {
+		g := pending.Conditions[i]
+		if g.Type != w.Type || g.Status != w.Status || g.Reason != w.Reason ||
+			g.Message != w.Message || g.LastTransitionTime != w.LastTransitionTime {
+			t.Errorf("e2e-vm-pending condition[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+	if pending.Generation < 1 {
+		t.Errorf("e2e-vm-pending: generation = %d, want >= 1", pending.Generation)
+	}
+	if _, err := time.Parse(time.RFC3339, pending.CreationTimestamp); err != nil {
+		t.Errorf("e2e-vm-pending: creation_timestamp %q is not RFC 3339: %v", pending.CreationTimestamp, err)
+	}
 }
 
 func TestE2E_GetResources_Wildcard(t *testing.T) {
