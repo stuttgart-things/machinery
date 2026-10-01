@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 )
 
 func TestEffectiveToken(t *testing.T) {
@@ -69,5 +73,27 @@ func TestTrunc(t *testing.T) {
 	}
 	if got := trunc("abcdefghij", 5); len([]rune(got)) != 5 {
 		t.Errorf("trunc(10 chars, 5) = %q (%d runes), want 5", got, len([]rune(got)))
+	}
+}
+
+func TestWriteConditions(t *testing.T) {
+	var buf bytes.Buffer
+	writeConditions(&buf, []*resourceservice.Condition{
+		{Type: "Synced", Status: "True", Reason: "ReconcileSuccess", LastTransitionTime: "2026-09-30T10:01:00Z"},
+		{Type: "Ready", Status: "False", Reason: "Creating", Message: "line one\n\tline two " + strings.Repeat("x", 300)},
+	})
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want header + one line per condition (3), got %d: %q", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[1], "Synced") || !strings.Contains(lines[1], "ReconcileSuccess") ||
+		!strings.Contains(lines[1], "2026-09-30T10:01:00Z") {
+		t.Errorf("unexpected Synced line: %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "line one line two") || !strings.Contains(lines[2], "…") {
+		t.Errorf("message not single-lined/truncated: %q", lines[2])
+	}
+	if strings.Count(lines[2], "x") >= 300 {
+		t.Errorf("message not truncated: %q", lines[2])
 	}
 }

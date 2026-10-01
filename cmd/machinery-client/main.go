@@ -357,15 +357,43 @@ func emitDetail(r *resourceservice.ResourceStatus) int {
 	fmt.Printf("Ready:       %s\n", boolStr(r.Ready))
 	fmt.Printf("Status:      %s\n", r.StatusMessage)
 	fmt.Printf("Connection:  %s\n", r.ConnectionDetails)
+	fmt.Printf("Created:     %s\n", dash(r.CreationTimestamp))
+	fmt.Printf("Generation:  %d (observed %d)\n", r.Generation, r.ObservedGeneration)
 	if len(r.InfoFields) > 0 {
 		fmt.Println("Info:")
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		for k, v := range r.InfoFields {
 			fmt.Fprintf(w, "  %s\t%s\n", k, v)
 		}
+		if rc := flush(w); rc != 0 {
+			return rc
+		}
+	}
+	if len(r.Conditions) > 0 {
+		fmt.Println("Conditions:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		writeConditions(w, r.Conditions)
 		return flush(w)
 	}
 	return 0
+}
+
+// conditionMessageWidth caps a condition message in the detail view so
+// each condition stays on one terminal line. The server already caps
+// messages at 1 KiB; use --json for the full text.
+const conditionMessageWidth = 120
+
+// writeConditions renders one tab-separated line per condition:
+// type, status, reason, message (single-lined and truncated) and
+// lastTransitionTime. Empty fields print as "-".
+func writeConditions(w io.Writer, conds []*resourceservice.Condition) {
+	_, _ = fmt.Fprintln(w, "  TYPE\tSTATUS\tREASON\tMESSAGE\tLAST TRANSITION")
+	for _, c := range conds {
+		msg := strings.Join(strings.Fields(c.GetMessage()), " ")
+		_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
+			dash(c.GetType()), dash(c.GetStatus()), dash(c.GetReason()),
+			dash(trunc(msg, conditionMessageWidth)), dash(c.GetLastTransitionTime()))
+	}
 }
 
 func emitJSON(v any) int {
@@ -399,10 +427,11 @@ func boolStr(b bool) string {
 }
 
 func trunc(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 // fail prints a "code: message" line and returns a non-zero exit code.

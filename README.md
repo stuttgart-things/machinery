@@ -56,6 +56,18 @@ message ResourceStatus {
   string connection_details = 5;
   string namespace = 6;
   map<string, string> info_fields = 7;
+  repeated Condition conditions = 8;  // status.conditions, original order
+  int64 generation = 9;               // metadata.generation
+  int64 observed_generation = 10;     // status.observedGeneration, 0 if absent
+  string creation_timestamp = 11;     // metadata.creationTimestamp, RFC 3339
+}
+
+message Condition {
+  string type = 1;
+  string status = 2;                  // "True" | "False" | "Unknown"
+  string reason = 3;
+  string message = 4;                 // capped at 1 KiB, truncation ends in "…"
+  string last_transition_time = 5;    // RFC 3339, empty if unset
 }
 
 enum EventType { ADDED = 0; MODIFIED = 1; DELETED = 2; }
@@ -67,6 +79,15 @@ message ResourceEvent {
 ```
 
 `GetResources` / `GetResourceDetail` answer from a shared informer cache — one watch per configured kind, no per-request API-server calls. `WatchResources` is a server stream: the current state replays as `ADDED` events on subscribe, then live `ADDED` / `MODIFIED` / `DELETED` deltas follow.
+
+All three RPCs carry the same `ResourceStatus` projection:
+
+- **`ready` / `status_message`** are the condensed view: `Ready` / `Not Ready` from the `type: Ready` condition, or — for Gateway API kinds — the aggregation over `status.parents[*].conditions` (see [`examples/configs/README.md`](examples/configs/README.md#readiness)). A kind without a `Ready` condition always reports `ready=false`; check `conditions` to tell that apart from "not ready".
+- **`conditions`** is `status.conditions` verbatim and in order (`type`, `status`, `reason`, `message`, `last_transition_time`), so clients can read e.g. Crossplane's `Synced` or the reason a resource is stuck, and detect hangs from `last_transition_time`. Messages are capped at 1 KiB. Gateway API per-parent conditions are not copied here; for those kinds `conditions` is empty unless the object also has a top-level `status.conditions`. Malformed entries are skipped.
+- **`generation` / `observed_generation`** let a client see whether the controller has caught up with the latest spec (`observed_generation` is 0 when the resource does not publish it).
+- **`creation_timestamp`** is RFC 3339 (UTC).
+
+Fields 8–11 were added without renumbering 1–7; older clients simply ignore them.
 
 ## CLI client
 

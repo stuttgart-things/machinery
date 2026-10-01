@@ -25,7 +25,7 @@ go build -o machinery-client ./cmd/machinery-client
 | Command   | RPC                                  | Notes |
 |-----------|--------------------------------------|---|
 | `list`    | `ResourceService.GetResources`       | `--kind=*` returns every configured kind |
-| `get`     | `ResourceService.GetResourceDetail`  | `--kind` + `--name` required; `--namespace` for namespaced CRs |
+| `get`     | `ResourceService.GetResourceDetail`  | `--kind` + `--name` required; `--namespace` for namespaced CRs. Shows creation time, generation/observed generation and one line per condition (type, status, reason, message cut to 120 chars, last transition) |
 | `watch`   | `ResourceService.WatchResources`     | streams live ADDED/MODIFIED/DELETED events; Ctrl-C to stop |
 | `health`  | `grpc.health.v1.Health/Check`        | non-zero exit if the server isn't `SERVING` |
 | `version` | —                                    | prints the build version |

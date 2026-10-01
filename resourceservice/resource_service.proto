@@ -4,6 +4,15 @@ package resourceservice;
 
 option go_package = "github.com/stuttgart-things/machinery/resourceservice;maschinist";
 
+// Condition mirrors one entry of a resource's status.conditions.
+message Condition {
+    string type = 1;
+    string status = 2;               // "True" | "False" | "Unknown"
+    string reason = 3;
+    string message = 4;              // truncated to a fixed cap (1 KiB)
+    string last_transition_time = 5; // RFC 3339, empty if unset
+}
+
 // Define the ResourceStatus struct
 message ResourceStatus {
     string name = 1;
@@ -13,6 +22,10 @@ message ResourceStatus {
     string connection_details = 5;
     string namespace = 6;
     map<string, string> info_fields = 7;
+    repeated Condition conditions = 8;   // status.conditions, in original order
+    int64 generation = 9;                // metadata.generation
+    int64 observed_generation = 10;      // status.observedGeneration, 0 if absent
+    string creation_timestamp = 11;      // metadata.creationTimestamp, RFC 3339
 }
 
 // Request message with count and kind parameters

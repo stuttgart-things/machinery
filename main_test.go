@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	resourceservice "github.com/stuttgart-things/machinery/resourceservice"
 	"google.golang.org/grpc"
@@ -756,5 +757,247 @@ func TestRetryUnservedKinds_AttachesLateKind(t *testing.T) {
 			t.Fatal("informer for LateVM never attached after the kind became served")
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+// --- ResourceStatus: conditions, generation, creationTimestamp (#96) ---
+
+func TestToResourceStatus_Conditions(t *testing.T) {
+	rk := ResourceKind{}
+
+	t.Run("with conditions, order and fields preserved", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{
+				"name":              "c1",
+				"generation":        int64(4),
+				"creationTimestamp": "2026-09-30T10:00:00Z",
+			},
+			"status": map[string]any{
+				"observedGeneration": int64(3),
+				"conditions": []any{
+					map[string]any{
+						"type": "Synced", "status": "True", "reason": "ReconcileSuccess",
+						"lastTransitionTime": "2026-09-30T10:01:00Z",
+					},
+					map[string]any{
+						"type": "Ready", "status": "False", "reason": "Creating",
+						"message": "PipelineRun failed", "lastTransitionTime": "2026-09-30T10:02:00Z",
+					},
+				},
+			},
+		}}
+		rs := toResourceStatus(obj, "ClusterStack", rk)
+		if rs.Ready || rs.StatusMessage != "Not Ready" {
+			t.Errorf("ready/status_message changed: ready=%v msg=%q", rs.Ready, rs.StatusMessage)
+		}
+		if len(rs.Conditions) != 2 {
+			t.Fatalf("expected 2 conditions, got %d", len(rs.Conditions))
+		}
+		c0, c1 := rs.Conditions[0], rs.Conditions[1]
+		if c0.Type != "Synced" || c0.Status != "True" || c0.Reason != "ReconcileSuccess" ||
+			c0.Message != "" || c0.LastTransitionTime != "2026-09-30T10:01:00Z" {
+			t.Errorf("unexpected condition[0]: %+v", c0)
+		}
+		if c1.Type != "Ready" || c1.Status != "False" || c1.Reason != "Creating" ||
+			c1.Message != "PipelineRun failed" || c1.LastTransitionTime != "2026-09-30T10:02:00Z" {
+			t.Errorf("unexpected condition[1]: %+v", c1)
+		}
+		if rs.Generation != 4 || rs.ObservedGeneration != 3 {
+			t.Errorf("generation=%d observed=%d, want 4/3", rs.Generation, rs.ObservedGeneration)
+		}
+		if rs.CreationTimestamp != "2026-09-30T10:00:00Z" {
+			t.Errorf("creation_timestamp=%q", rs.CreationTimestamp)
+		}
+	})
+
+	t.Run("without status", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "c2"},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		if len(rs.Conditions) != 0 || rs.Generation != 0 || rs.ObservedGeneration != 0 || rs.CreationTimestamp != "" {
+			t.Errorf("expected zero values, got %+v", rs)
+		}
+		if rs.StatusMessage != "No conditions found" || rs.Ready {
+			t.Errorf("ready/status_message changed: %v %q", rs.Ready, rs.StatusMessage)
+		}
+	})
+
+	t.Run("empty conditions list", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "c3"},
+			"status":   map[string]any{"conditions": []any{}},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		if len(rs.Conditions) != 0 {
+			t.Errorf("expected no conditions, got %+v", rs.Conditions)
+		}
+		if rs.StatusMessage != "Not Ready" || rs.Ready {
+			t.Errorf("ready/status_message changed: %v %q", rs.Ready, rs.StatusMessage)
+		}
+	})
+
+	t.Run("missing observedGeneration is 0", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "c4", "generation": int64(7)},
+			"status": map[string]any{
+				"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+			},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		if rs.Generation != 7 || rs.ObservedGeneration != 0 {
+			t.Errorf("generation=%d observed=%d, want 7/0", rs.Generation, rs.ObservedGeneration)
+		}
+		if !rs.Ready || rs.StatusMessage != "Ready" {
+			t.Errorf("ready/status_message changed: %v %q", rs.Ready, rs.StatusMessage)
+		}
+	})
+
+	t.Run("long message is truncated", func(t *testing.T) {
+		long := strings.Repeat("ä", maxConditionMessageBytes) // 2 bytes per rune
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "c5"},
+			"status": map[string]any{
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "False", "message": long},
+					map[string]any{"type": "Synced", "status": "True", "message": "short"},
+				},
+			},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		msg := rs.Conditions[0].Message
+		if len(msg) > maxConditionMessageBytes {
+			t.Errorf("message is %d bytes, cap is %d", len(msg), maxConditionMessageBytes)
+		}
+		if !strings.HasSuffix(msg, conditionTruncationMarker) {
+			t.Errorf("truncated message lacks marker")
+		}
+		if !utf8.ValidString(msg) {
+			t.Error("truncated message is not valid UTF-8")
+		}
+		if rs.Conditions[1].Message != "short" {
+			t.Errorf("short message changed: %q", rs.Conditions[1].Message)
+		}
+	})
+
+	t.Run("malformed entries are skipped or ignored", func(t *testing.T) {
+		// Only JSON-decodable value types (int64, float64, bool, nil,
+		// string, map, slice): that is all an informer can hand us, and
+		// the existing getResourceStatus deep-copies via NestedSlice,
+		// which rejects plain Go int.
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{
+				"name":              "c6",
+				"generation":        "not-a-number",
+				"creationTimestamp": int64(12345),
+			},
+			"status": map[string]any{
+				"observedGeneration": []any{int64(1)},
+				"conditions": []any{
+					"just a string",
+					nil,
+					int64(42),
+					map[string]any{"type": int64(1), "status": true, "reason": nil, "message": map[string]any{}, "lastTransitionTime": float64(99)},
+					map[string]any{"type": "Ready", "status": "True"},
+				},
+			},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		if len(rs.Conditions) != 2 {
+			t.Fatalf("expected 2 conditions (non-maps skipped), got %d: %+v", len(rs.Conditions), rs.Conditions)
+		}
+		if c := rs.Conditions[0]; c.Type != "" || c.Status != "" || c.Reason != "" || c.Message != "" || c.LastTransitionTime != "" {
+			t.Errorf("non-string fields should be empty, got %+v", c)
+		}
+		if rs.Conditions[1].Type != "Ready" {
+			t.Errorf("unexpected condition[1]: %+v", rs.Conditions[1])
+		}
+		if rs.Generation != 0 || rs.ObservedGeneration != 0 || rs.CreationTimestamp != "" {
+			t.Errorf("malformed metadata should yield zero values, got gen=%d obs=%d ts=%q",
+				rs.Generation, rs.ObservedGeneration, rs.CreationTimestamp)
+		}
+		if !rs.Ready {
+			t.Error("ready should still be derived from the Ready condition")
+		}
+	})
+
+	t.Run("conditions not a list", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "c7"},
+			"status":   map[string]any{"conditions": "oops"},
+		}}
+		rs := toResourceStatus(obj, "X", rk)
+		if len(rs.Conditions) != 0 {
+			t.Errorf("expected no conditions, got %+v", rs.Conditions)
+		}
+	})
+
+	t.Run("gateway kind: parents aggregated, conditions empty", func(t *testing.T) {
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "route"},
+			"status": map[string]any{
+				"parents": []any{
+					map[string]any{
+						"conditions": []any{
+							map[string]any{"type": "Accepted", "status": "False", "reason": "NoMatchingParent"},
+							map[string]any{"type": "ResolvedRefs", "status": "True"},
+						},
+					},
+				},
+			},
+		}}
+		rs := toResourceStatus(obj, "HTTPRoute", rk)
+		if rs.Ready || rs.StatusMessage != "Accepted: NoMatchingParent" {
+			t.Errorf("gateway aggregation changed: ready=%v msg=%q", rs.Ready, rs.StatusMessage)
+		}
+		if len(rs.Conditions) != 0 {
+			t.Errorf("expected no conditions for parents-only status, got %+v", rs.Conditions)
+		}
+	})
+}
+
+func TestTruncateMessage(t *testing.T) {
+	if got := truncateMessage("abc", 3); got != "abc" {
+		t.Errorf("at cap: got %q", got)
+	}
+	if got := truncateMessage("abcdef", 5); got != "ab"+conditionTruncationMarker {
+		t.Errorf("over cap: got %q", got)
+	}
+	if got := truncateMessage("abcdef", 1); got != conditionTruncationMarker {
+		t.Errorf("cap smaller than marker: got %q", got)
+	}
+}
+
+func TestGetResourceDetail_CarriesConditions(t *testing.T) {
+	vm := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
+			"kind":       "HarvesterVM",
+			"metadata": map[string]any{
+				"name": "cond-vm", "namespace": "team-x", "generation": int64(2),
+			},
+			"status": map[string]any{
+				"observedGeneration": int64(2),
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "False", "reason": "Creating", "message": "waiting"},
+				},
+			},
+		},
+	}
+	vm.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
+	})
+	s := newTestServer(t, vm)
+	resp, err := s.GetResourceDetail(context.Background(), &resourceservice.ResourceDetailRequest{
+		Kind: "HarvesterVM", Name: "cond-vm", Namespace: "team-x",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Conditions) != 1 || resp.Conditions[0].Reason != "Creating" || resp.Conditions[0].Message != "waiting" {
+		t.Errorf("unexpected conditions: %+v", resp.Conditions)
+	}
+	if resp.Generation != 2 || resp.ObservedGeneration != 2 {
+		t.Errorf("generation=%d observed=%d, want 2/2", resp.Generation, resp.ObservedGeneration)
 	}
 }

@@ -32,7 +32,9 @@ Dot-paths support `string`, `bool`, and `int64` scalars, plus slices:
 collapses to `namespace/name` pairs when the items carry those keys
 (e.g. `spec.parentRefs`). Missing paths render as empty. Array
 indexing (`spec.parentRefs[0].name`) is not supported — point at the
-parent path and let the renderer flatten it.
+parent path and let the renderer flatten it. For `status.conditions`
+there is no need for an info field: every `ResourceStatus` already
+carries them in its `conditions` list.
 
 ## Readiness
 

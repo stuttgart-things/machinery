@@ -81,7 +81,7 @@ kubectl patch harvestervm.resources.stuttgart-things.com e2e-vm-ready -n default
   -p '{"status":{"vm":{"name":"e2e-vm-ready","ready":true},"volume":{"ready":true},"cloudInit":{"ready":true},"conditions":[{"type":"Ready","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z","reason":"E2E","message":"ready"}]}}'
 kubectl patch harvestervm.resources.stuttgart-things.com e2e-vm-pending -n default \
   --subresource=status --type=merge \
-  -p '{"status":{"vm":{"name":"e2e-vm-pending","ready":false},"volume":{"ready":true},"cloudInit":{"ready":false},"conditions":[{"type":"Ready","status":"False","lastTransitionTime":"2026-01-01T00:00:00Z","reason":"E2E","message":"not ready"}]}}'
+  -p '{"status":{"vm":{"name":"e2e-vm-pending","ready":false},"volume":{"ready":true},"cloudInit":{"ready":false},"conditions":[{"type":"Synced","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z","reason":"ReconcileSuccess"},{"type":"Ready","status":"False","lastTransitionTime":"2026-01-01T00:00:00Z","reason":"E2E","message":"not ready"}]}}'
 kubectl patch storageplatform.resources.stuttgart-things.com e2e-storage -n default \
   --subresource=status --type=merge \
   -p '{"status":{"installed":true,"observedVersion":"1.2.3","conditions":[{"type":"Ready","status":"True","lastTransitionTime":"2026-01-01T00:00:00Z","reason":"E2E","message":"ready"}]}}'
