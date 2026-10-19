@@ -22,11 +22,13 @@ jobs:
     # Running kind on top of that doubles the runner cost (and the wait)
     # without adding much signal — skip.
     if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'preview')
-    # Dedicated kind-only runners (kind-testing-runner-1 / -2). The
-    # concurrency group above keeps only one job running at a time; the
-    # second runner is hot spare or room for a sibling project. Same pattern
-    # as stuttgart-things/function-homerun2-pitcher.
-    runs-on: [self-hosted, kind-testing-runner-1]
+    # kind runners, selected by the shared `kind-testing-labda` label rather
+    # than by machine name: the label is carried by every LabDA runner VM that
+    # can run kind (dagger-gh-runner-labda1/2), and the machine this used to
+    # name (kind-testing-runner-1) is being decommissioned (stuttgart-things#3635).
+    # A `runs-on` array is an AND over labels -- naming one machine pinned every
+    # run to it.
+    runs-on: [self-hosted, kind-testing-labda]
     timeout-minutes: 30
     permissions:
       contents: read
