@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/stuttgart-things/machinery/compare/v1.14.1...v1.15.0) (2026-10-24)
+
+
+### Features
+
+* JSON API GET /api/v1/resources with fleet annotations ([#106](https://github.com/stuttgart-things/machinery/issues/106)) ([aee981d](https://github.com/stuttgart-things/machinery/commit/aee981de062030905efe666de72efee0ec4d8f04))
+
 ## [1.14.1](https://github.com/stuttgart-things/machinery/compare/v1.14.0...v1.14.1) (2026-10-19)
 
 
