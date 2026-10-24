@@ -15,7 +15,34 @@ Client (gRPC)  ──> gRPC :50051 ─┘        (dynamic client)
 | Protocol | Port | Paths |
 |----------|------|-------|
 | gRPC | 50051 | `ResourceService.GetResources`, `.GetResourceDetail`, `.WatchResources` |
-| HTTP | 8080 | `/` (dashboard), `/resources` (table), `/detail` (detail view), `/health` |
+| HTTP | 8080 | `/` (dashboard), `/resources` (table), `/detail` (detail view), `/health`, `/api/v1/resources` (JSON) |
+
+## JSON API
+
+`GET /api/v1/resources` returns the watched objects as JSON, for programmatic
+clients such as the Backstage claim picker. Same informer cache as the
+dashboard; read-only.
+
+| Query | Example | Effect |
+|---|---|---|
+| `kind` | `ClusterStack,NativeVsphereVM` | only these kinds (default: all watched) |
+| `namespace` | `default` | only these namespaces (comma-separated) |
+| `annotation` | `stuttgart-things.com/source-path` | only objects carrying this annotation |
+
+```bash
+curl -s 'http://localhost:8080/api/v1/resources?annotation=stuttgart-things.com/source-path'
+```
+
+```json
+{"items":[{"kind":"ClusterStack","apiVersion":"config.stuttgart-things.com/v1alpha1","name":"app-dev","namespace":"default","ready":true,"creationTimestamp":"2026-09-21T10:12:03Z","annotations":{"stuttgart-things.com/management-cluster":"machinery","stuttgart-things.com/source-path":"clusters/labda/vsphere/machinery-xrs/app-dev.yaml"}}]}
+```
+
+Only annotations under `stuttgart-things.com/` are returned (never
+`kubectl.kubernetes.io/last-applied-configuration`). `source-path` names the
+file the XR lives in, so filtering on it yields exactly the ordered top-level
+XRs, without the objects their compositions create
+([design](docs/design/claim-scheduler.md), phase 1). An unknown `kind` is a
+`400` with `{"error": "..."}`.
 
 ## Web Frontend
 

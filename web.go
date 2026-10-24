@@ -70,6 +70,7 @@ func (w *webServer) handler() http.Handler {
 	mux.HandleFunc("GET /resources", w.handleResources)
 	mux.HandleFunc("GET /detail", w.handleDetail)
 	mux.HandleFunc("GET /health", w.handleHealth)
+	mux.HandleFunc("GET /api/v1/resources", w.handleAPIResources)
 	return mux
 }
 
