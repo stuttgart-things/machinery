@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/stuttgart-things/machinery/compare/v1.16.0...v1.17.0) (2026-10-25)
+
+
+### Features
+
+* compact header and portal tokens inside sthings-portal ([#112](https://github.com/stuttgart-things/machinery/issues/112)) ([b87e3ac](https://github.com/stuttgart-things/machinery/commit/b87e3ac45e5a4afce38f13c25a67bdc31b404bec))
+
 # [1.16.0](https://github.com/stuttgart-things/machinery/compare/v1.15.0...v1.16.0) (2026-10-25)
 
 
