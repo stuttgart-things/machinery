@@ -13,7 +13,7 @@ import (
 
 func TestWebIndex(t *testing.T) {
 	srv := newTestServer(t)
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestWebResources(t *testing.T) {
 	})
 
 	srv := newTestServer(t, obj)
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestWebResources(t *testing.T) {
 
 func TestWebResourcesEmpty(t *testing.T) {
 	srv := newTestServer(t)
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestWebResourcesEmpty(t *testing.T) {
 
 func TestWebHealth(t *testing.T) {
 	srv := newTestServer(t)
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestWebHealth(t *testing.T) {
 
 func TestWebNotFound(t *testing.T) {
 	srv := newTestServer(t)
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestWebResourcesNamespaceFilter(t *testing.T) {
 	}
 
 	srv := newTestServer(t, mkVM("vm-a", "team-a"), mkVM("vm-b", "team-b"), mkVM("vm-c", "team-a"))
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestWebResourcesNamespaceFilter(t *testing.T) {
 			Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
 		})
 		srv2 := newTestServer(t, mkVM("vm-a", "team-a"), clusterObj)
-		webSrv2, _ := newWebServer(srv2)
+		webSrv2, _ := newWebServer(srv2, "")
 
 		req := httptest.NewRequest("GET", "/resources?kind=HarvesterVM&namespace=team-a", nil)
 		rr := httptest.NewRecorder()
@@ -258,3 +258,90 @@ func TestWebResourcesNamespaceFilter(t *testing.T) {
 
 // Ensure unused import is used
 var _ runtime.Object
+
+func TestParseBasePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                "",
+		"/":               "",
+		"/machinery":      "/machinery",
+		"/machinery/":     "/machinery",
+		" /lab/machinery": "/lab/machinery",
+	} {
+		got, err := parseBasePath(in)
+		if err != nil || got != want {
+			t.Errorf("parseBasePath(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"machinery", "/a//b", "/a/../b", "/a b", "/a?x", "/a#x", "/a%2f"} {
+		if got, err := parseBasePath(in); err == nil {
+			t.Errorf("parseBasePath(%q) = %q, want an error", in, got)
+		}
+	}
+}
+
+// TestWebBasePath covers the sthings-portal prefix contract: the portal
+// forwards /machinery/... unchanged, so every page answers under the prefix
+// and every URL handed to the browser carries it. /health and the JSON API
+// stay at the root too.
+func TestWebBasePath(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "resources.stuttgart-things.com/v1alpha1",
+			"kind":       "HarvesterVM",
+			"metadata":   map[string]any{"name": "prefixed-vm", "namespace": "default"},
+		},
+	}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "resources.stuttgart-things.com", Version: "v1alpha1", Kind: "HarvesterVM",
+	})
+	webSrv, err := newWebServer(newTestServer(t, obj), "/machinery")
+	if err != nil {
+		t.Fatalf("failed to create web server: %v", err)
+	}
+	h := webSrv.handler()
+	get := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+		return rr
+	}
+
+	for _, path := range []string{
+		"/machinery/",
+		"/machinery/resources?kind=HarvesterVM",
+		"/machinery/detail?kind=HarvesterVM&name=prefixed-vm&namespace=default",
+		"/machinery/health",
+		"/machinery/api/v1/resources",
+		"/health",
+		"/api/v1/resources",
+	} {
+		if rr := get(path); rr.Code != http.StatusOK {
+			t.Errorf("GET %s: expected 200, got %d", path, rr.Code)
+		}
+	}
+	for _, path := range []string{"/", "/resources?kind=*", "/detail?kind=HarvesterVM&name=prefixed-vm"} {
+		if rr := get(path); rr.Code != http.StatusNotFound {
+			t.Errorf("GET %s: expected 404 outside the prefix, got %d", path, rr.Code)
+		}
+	}
+	if rr := get("/machinery"); rr.Code/100 != 3 || rr.Header().Get("Location") != "/machinery/" {
+		t.Errorf("GET /machinery: expected redirect to /machinery/, got %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+
+	index := get("/machinery/").Body.String()
+	if !strings.Contains(index, `const BASE_PATH = "/machinery";`) {
+		t.Error("index: expected the JS refresh URL to carry the prefix")
+	}
+	for path, body := range map[string]string{
+		"index":     index,
+		"resources": get("/machinery/resources?kind=HarvesterVM").Body.String(),
+		"detail":    get("/machinery/detail?kind=HarvesterVM&name=prefixed-vm&namespace=default").Body.String(),
+	} {
+		n := strings.Count(body, `hx-get="`)
+		if n == 0 {
+			t.Errorf("%s: expected hx-get links", path)
+		}
+		if p := strings.Count(body, `hx-get="/machinery/`); p != n {
+			t.Errorf("%s: %d of %d hx-get links lack the /machinery prefix", path, n-p, n)
+		}
+	}
+}

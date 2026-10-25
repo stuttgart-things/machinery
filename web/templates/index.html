@@ -290,7 +290,7 @@
         </div>
 
         <div id="resource-list"
-             hx-get="/resources?kind=*"
+             hx-get="{{base}}/resources?kind=*"
              hx-trigger="load"
              hx-sync="this:abort"
              hx-indicator="#spinner">
@@ -310,6 +310,9 @@
         // "no filter" → server returns everything for that axis.
         const state = { kinds: new Set(), namespaces: new Set() };
 
+        // Prefix the UI is served under (BASE_PATH), "" without one.
+        const BASE_PATH = {{base}};
+
         const REFRESH_MS = 5000;
         let refreshTimer = null;
 
@@ -319,7 +322,7 @@
             if (state.namespaces.size) {
                 p.set('namespace', [...state.namespaces].join(','));
             }
-            return '/resources?' + p.toString();
+            return BASE_PATH + '/resources?' + p.toString();
         }
 
         // refreshNow issues a request for the *current* filter selection

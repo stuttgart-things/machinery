@@ -10,6 +10,7 @@ _namespace = option("config.namespace")
 _grpcPort = option("config.grpcPort")
 _httpPort = option("config.httpPort")
 _httpEnabled = option("config.httpEnabled")
+_basePath = option("config.basePath")
 _kubeconfigSecret = option("config.kubeconfigSecret")
 _configJson = option("config.configJson")
 _httpRouteEnabled = option("config.httpRouteEnabled")
@@ -39,6 +40,8 @@ config: schema.Machinery = schema.Machinery {
         httpPort = int(_httpPort)
     if _httpEnabled:
         httpEnabled = _httpEnabled in [True, "True", "true"]
+    if _basePath:
+        basePath = _basePath
     if _kubeconfigSecret:
         kubeconfigSecret = _kubeconfigSecret
     if _configJson:

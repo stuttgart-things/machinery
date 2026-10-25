@@ -18,7 +18,7 @@ the namespace chip row, preserving the user's current selection. */}}
     <tbody>
         {{range .Resources}}
         <tr class="clickable-row"
-            hx-get="/detail?kind={{.Kind}}&name={{.Name}}&namespace={{.Namespace}}"
+            hx-get="{{base}}/detail?kind={{.Kind}}&name={{.Name}}&namespace={{.Namespace}}"
             hx-target="#resource-list"
             hx-push-url="false"
             style="cursor: pointer;">

@@ -41,6 +41,7 @@ import (
 var (
 	kubeconfig = os.Getenv("KUBECONFIG")
 	configPath = os.Getenv("MACHINERY_CONFIG")
+	basePath   = os.Getenv("BASE_PATH")
 )
 
 // informerResync is the dynamic informer factory's resync period. The
@@ -189,7 +190,12 @@ func main() {
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 
 	// Start HTTP server (HTMX frontend)
-	webSrv, err := newWebServer(srv)
+	prefix, err := parseBasePath(basePath)
+	if err != nil {
+		slog.Error("invalid BASE_PATH", "error", err)
+		os.Exit(1)
+	}
+	webSrv, err := newWebServer(srv, prefix)
 	if err != nil {
 		slog.Error("failed to initialize web server", "error", err)
 		os.Exit(1)

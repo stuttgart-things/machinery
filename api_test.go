@@ -31,7 +31,7 @@ func apiTestVM(name, ns string, annotations map[string]any) *unstructured.Unstru
 
 func getAPI(t *testing.T, srv *server, url string) (*httptest.ResponseRecorder, apiResourceList) {
 	t.Helper()
-	webSrv, err := newWebServer(srv)
+	webSrv, err := newWebServer(srv, "")
 	if err != nil {
 		t.Fatalf("failed to create web server: %v", err)
 	}

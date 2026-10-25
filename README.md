@@ -55,6 +55,24 @@ HTMX-based dashboard at `http://localhost:8080`:
 - Build info footer (version, commit, date)
 - Dark theme
 
+### Behind sthings-portal (`BASE_PATH`)
+
+Set `BASE_PATH=/machinery` (KCL: `config.basePath`) to serve the dashboard
+under that prefix, e.g. behind
+[sthings-portal](https://github.com/stuttgart-things/homerun2-portal/issues/23).
+The portal forwards the path unchanged (`/machinery/resources` reaches
+machinery as `/machinery/resources`), so machinery answers under the prefix
+and puts it on every URL it hands to the browser.
+
+| Path | Without `BASE_PATH` | With `BASE_PATH=/machinery` |
+|---|---|---|
+| dashboard, `/resources`, `/detail` | `/…` | `/machinery/…` only |
+| `/health` | `/health` | `/health` and `/machinery/health` |
+| `/api/v1/resources` | `/api/v1/resources` | both — in-cluster clients keep the root URL |
+
+The value must be empty or `/segment[/segment…]`; anything else fails
+startup.
+
 ## gRPC API
 
 ```protobuf
