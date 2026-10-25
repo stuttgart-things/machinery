@@ -207,7 +207,34 @@ Darum gibt es pro Kind eine Liste erlaubter Änderungen, als Code neben `hack/cl
 3. `pr-claim-change.yaml` vergleicht alte und neue Datei und lehnt jede Änderung außerhalb der Liste ab.
 4. Merge, Flux, Crossplane. Ob die Änderung angekommen ist, zeigt machinery am Status des XR.
 
-Hier braucht es weder Dapr-Worker noch kubectl: Der PR ist schon die ganze Änderung. Die Vorlage kann ihn direkt öffnen (`publish:github:pull-request`).
+Hier braucht es weder Dapr-Worker noch kubectl: Der PR ist schon die ganze Änderung. Die Vorlage stößt `dispatch-change-claim.yaml` direkt an (`github:actions:dispatch`).
+
+**Stand (2026-10-25):** live für die VM-Größe (stuttgart-things#4096). Erster echter Durchlauf mit `cutover3-vm`, medium → large: Der PR #4103 änderte nur cpu, memory und disk. Nach dem Merge zeigte Proxmox 8 CPU, 16384 MiB und 100 GB, ohne dass die VM neu gebaut wurde.
+
+### Im Gast ankommen: Einmal-Lauf
+
+Was Crossplane an der VM ändert, kommt nicht vollständig im Gast an. Auf Proxmox wirken zusätzliche CPU und zusätzlicher RAM erst nach dem nächsten Neustart (`rebootAfterUpdate: false`). Eine größere Disk steckt bei beiden Providern noch nicht in Partition, LVM und Dateisystemen. Deshalb kann eine Größenänderung einen **Einmal-Lauf** mitbringen (stuttgart-things#4106):
+
+```mermaid
+flowchart LR
+    pr["PR change-claim/&lt;vm&gt;<br/>VM-Datei + resize-&lt;vm&gt;.yaml"] --> merge["Merge"]
+    merge --> sr["ScheduledRun, alle 10 min:<br/>im Fenster? schon gelaufen?<br/>Größe angewendet? Synced/Ready? IP?"]
+    sr -->|"einmal"| ar["AnsibleRun<br/>sthings.baseos.resize_vm"]
+    ar --> guest["Neustart (Proxmox),<br/>dann manage_filesystem"]
+    sr -->|"nach expires"| exp["expire-run-once.yaml:<br/>Löschen über delete-claim"]
+```
+
+- **Wann:**
+  - nach Feierabend: das nächste 19–22 Uhr Europe/Berlin, die Voreinstellung
+  - sofort nach dem Merge
+  - ab einem gewählten Zeitpunkt
+  - oder gar nicht
+
+  Das Fenster steht als `not-before`/`expires` in UTC am ScheduledRun. Wird der PR erst nach dem Fenster gemergt, passiert im Gast nichts.
+- **Nur einmal:** Der Name des AnsibleRun steht vorher fest (`resize-<vm>-<Start>`). Existiert es, beendet sich jeder weitere Tick.
+- **Erst wenn die Größe angekommen ist:** Das XR muss die neue Größe tragen, und jede komponierte Ressource muss `Synced` und `Ready` bei ihrer aktuellen `generation` sein.
+- **Kein Bauen von Hand:** Die Datei rendert `hack/claim-change.py` aus `hack/claim-change-run.yaml`. `pr-claim-change.yaml` rendert sie nach und lehnt jede Abweichung ab.
+- **Aufräumen:** Abgelaufene Läufe löscht nachts `expire-run-once.yaml`, über den Lösch-Weg aus Teil C: zuerst die Datei, dann das Objekt, gemergt erst bei grüner Prüfung.
 
 **Später sauberer:** Die Bestellung hält fest, aus welcher Vorlage und mit welchen Parametern sie entstanden ist (Annotation `stuttgart-things.com/order`). Eine Änderung rendert dann über claim-machinery-api neu, statt YAML zu patchen. Das passt zu Phase 3, in der claim-machinery-api ohnehin das Placement übernimmt.
 
@@ -241,7 +268,7 @@ Jede Phase liefert für sich etwas Nutzbares; die nächste beginnt erst, wenn di
 flowchart TB
     p0["<b>Phase 0 · source-path-Annotations (erledigt)</b><br/>Jedes XR in machinery-xrs nennt seine Datei; die CI prüft das (stuttgart-things#4073)<br/><i>Ergebnis: Objekt und Datei sind eindeutig verbunden</i>"]
     p1["<b>Phase 1 · Löschen über Backstage (live)</b><br/>JSON-Endpunkt in machinery, Picker auf Live-XRs, Vorlage request-claim-deletion, Worker delete-claim<br/><i>Ergebnis: Claims auf machinery per PR löschbar; Reste der registry-api entfernt</i>"]
-    p1b["<b>Phase 1b · Ändern über Backstage</b><br/>Vorlage request-claim-change mit erlaubten Feldern pro Kind, PR-Prüfung pr-claim-change<br/><i>Ergebnis: VM-Größe, Disk, Zeitplan per PR änderbar</i>"]
+    p1b["<b>Phase 1b · Ändern über Backstage (live: VM-Größe)</b><br/>Vorlage request-claim-change mit erlaubten Feldern pro Kind, PR-Prüfung pr-claim-change; Einmal-Lauf für Neustart und Dateisysteme<br/><i>Ergebnis: VM-Größe per PR änderbar, im Gast angewendet zur gewünschten Zeit</i>"]
     p2["<b>Phase 2 · Fleet-Registrierung</b><br/>Eine Datei pro Plane; ein Exporter meldet XRDs, EnvironmentConfigs, ProviderConfigs, Gesundheit<br/><i>Ergebnis: eine Liste aller Planes mit dem, was sie können</i>"]
     p3["<b>Phase 3 · Placement beim Bestellen</b><br/>Filter und Bewertung als Schritt in claim-machinery-api; Backstage und claims nutzen ihn<br/><i>Ergebnis: neue Claims landen auf der passenden Plane, mit Begründung im PR</i>"]
     p4["<b>Phase 4 · Operator und GUI</b><br/>CRD ClaimRequest mit Status, ein Operator gleicht ab; Ansicht in der HTMX-Oberfläche von machinery<br/><i>Ergebnis: Requests über alle Planes verfolgbar, nicht nur als PR</i>"]
@@ -259,6 +286,6 @@ Phase 1 baut auf Phase 0 auf und braucht noch keinen Scheduler; der Operator kom
 - [ ] machinery im Multi-Cluster-Modus oder ein Exporter pro Plane? Ersteres braucht Kubeconfigs aller Planes an einer Stelle.
 - [ ] crossplane-mgmt liegt im harvester-Repo: bleibt das so, oder ziehen alle Plane-Verzeichnisse in ein Repo?
 - [ ] Wer löscht auf crossplane-mgmt: derselbe Dapr-Worker oder ein eigener?
-- [ ] Ändern: VM-Größe als Größenname (`medium`, `large`) in der Bestellung festhalten oder nur cpu/memory? Ersteres macht die Liste erlaubter Werte einfacher.
+- [x] Ändern: Größenname oder cpu/memory? Im Formular wird der Größenname gewählt, in der Datei stehen cpu/memory/disk aus der Größentabelle von create-vm. Die PR-Prüfung lässt nur Paare aus dieser Tabelle zu.
 - [ ] ClusterStack löschen: wann, und mit welchem Ablauf zum Abschalten der Platform?
 - [ ] Brauchen Requests einen eigenen Status (CRD `ClaimRequest`), oder reicht der PR als Status bis zur Operator-Phase?
