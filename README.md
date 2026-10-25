@@ -246,7 +246,7 @@ ghcr.io/stuttgart-things/machinery:<tag>
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.27+
 - [Task](https://taskfile.dev/) (optional, for task runner)
 - [KCL](https://www.kcl-lang.io/) (for rendering deployment manifests)
 - [protoc](https://grpc.io/docs/protoc-installation/) + Go plugins (for proto generation)
