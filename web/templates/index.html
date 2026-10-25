@@ -3,17 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>if (window.self !== window.top) document.documentElement.classList.add('hr-embedded')</script>
     <title>Machinery - Resource Dashboard</title>
     <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/stuttgart-things/docs/main/hugo/sthings-argo.png">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    {{if .PortalTheme}}<link rel="stylesheet" href="/static/homerun2-tokens.css">{{end}}
     <style>
+        /* Colours come from the sthings-portal design tokens (--hr-*). This
+           copy is the standalone look; behind the portal the page links
+           /static/homerun2-tokens.css, whose :root wins. */
+        :where(:root) {
+            --hr-bg: #0f1117;
+            --hr-surface: #1a1d27;
+            --hr-card: #1a1d27;
+            --hr-border: #2a2d3a;
+            --hr-text: #e1e4ed;
+            --hr-muted: #8b8fa3;
+            --hr-accent: #6c8aff;
+        }
         :root {
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --border: #2a2d3a;
-            --text: #e1e4ed;
-            --text-muted: #8b8fa3;
-            --accent: #6c8aff;
+            --bg: var(--hr-bg);
+            --surface: var(--hr-card);
+            --border: var(--hr-border);
+            --text: var(--hr-text);
+            --text-muted: var(--hr-muted);
+            --accent: var(--hr-accent);
             --green: #4ade80;
             --red: #f87171;
             --yellow: #fbbf24;
@@ -36,6 +50,15 @@
         }
         header h1 { font-size: 1.5rem; font-weight: 600; }
         header h1 span { color: var(--accent); }
+        /* Inside the portal's frame the portal names the service: the header
+           is one compact line (subtitle left, refresh controls right) and the
+           footer goes. */
+        .embedded-sub { display: none; }
+        .hr-embedded header { min-height: 44px; margin: -2rem -2rem 1.5rem; padding: 6px 16px; background: var(--hr-surface); border-bottom: 1px solid var(--border); }
+        .hr-embedded header h1 { display: none; }
+        .hr-embedded .embedded-sub { display: inline; font-size: 13px; color: var(--text-muted); }
+        .hr-embedded .status-bar { font-size: 12px; }
+        .hr-embedded footer { display: none; }
         .status-bar {
             display: flex;
             align-items: center;
@@ -266,6 +289,7 @@
     <div class="container">
         <header>
             <h1><span>machinery</span> dashboard</h1>
+            <span class="embedded-sub">Crossplane resources</span>
             <div class="status-bar">
                 <div class="pulse" id="pulse"></div>
                 <span id="refresh-status">auto-refresh 5s</span>

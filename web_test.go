@@ -345,3 +345,35 @@ func TestWebBasePath(t *testing.T) {
 		}
 	}
 }
+
+// TestWebPortalEmbedding covers the sthings-portal embedded-header contract:
+// the embedded class is set before the first paint, and the portal's design
+// tokens are linked only for requests that came through the portal.
+func TestWebPortalEmbedding(t *testing.T) {
+	webSrv, err := newWebServer(newTestServer(t), "/machinery")
+	if err != nil {
+		t.Fatalf("failed to create web server: %v", err)
+	}
+	get := func(header ...string) string {
+		req := httptest.NewRequest("GET", "/machinery/", nil)
+		if len(header) == 2 {
+			req.Header.Set(header[0], header[1])
+		}
+		rr := httptest.NewRecorder()
+		webSrv.handler().ServeHTTP(rr, req)
+		return rr.Body.String()
+	}
+
+	plain := get()
+	for _, want := range []string{`classList.add('hr-embedded')`, `class="embedded-sub"`, ":where(:root)"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("index: expected %q", want)
+		}
+	}
+	if strings.Contains(plain, "homerun2-tokens.css") {
+		t.Error("index: links the portal tokens without X-Forwarded-Prefix")
+	}
+	if !strings.Contains(get("X-Forwarded-Prefix", "/machinery"), `<link rel="stylesheet" href="/static/homerun2-tokens.css">`) {
+		t.Error("index through the portal: expected the token stylesheet")
+	}
+}

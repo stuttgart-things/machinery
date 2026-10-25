@@ -33,6 +33,9 @@ type buildInfo struct {
 type indexData struct {
 	Kinds []string
 	Build buildInfo
+	// PortalTheme links the sthings-portal design tokens: the request came
+	// through the portal (X-Forwarded-Prefix).
+	PortalTheme bool
 }
 
 type resourceData struct {
@@ -129,7 +132,7 @@ func (w *webServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := w.templates.ExecuteTemplate(rw, "index.html", indexData{Kinds: kinds, Build: bi}); err != nil {
+	if err := w.templates.ExecuteTemplate(rw, "index.html", indexData{Kinds: kinds, Build: bi, PortalTheme: r.Header.Get("X-Forwarded-Prefix") != ""}); err != nil {
 		slog.Error("failed to render index", "error", err)
 		http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
 	}
