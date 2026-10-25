@@ -148,9 +148,19 @@ Gelöscht wird über eine neue Backstage-Vorlage `request-claim-deletion` nach d
 1. Nutzer wählt in Backstage das XR. Die Auswahl kommt aus den Live-XRs der Planes (machinery), angezeigt mit Kind, Name, Plane und `source-path`.
 2. Die Vorlage rendert eine `BackstageTemplateRun` und öffnet damit einen PR. Inhalt: Kind, Name, Namespace, Plane, `source-path`, Grund, wer angefragt hat.
 3. Ein Platform-Engineer merged den PR; Flux wendet die Run an.
-4. Der Dapr-Worker öffnet einen zweiten PR: Datei unter `source-path` entfernen, Eintrag aus der `kustomization.yaml` streichen.
-5. Nach dessen Merge und Flux-Abgleich löscht der Worker das XR. Bei einem `ClusterStack` setzt er vorher `platformEnabled: false` und wartet, bis die Platform-Ressourcen weg sind (die Usage `stack-uses-platform` blockiert sonst).
-6. Status und Ergebnis gehen an Homerun.
+4. Der Dapr-Worker startet die Vorlage `delete-claim`. Sie öffnet einen zweiten PR auf dem Branch `delete-claim/<name>`: Datei unter `source-path` entfernen, Eintrag aus der `kustomization.yaml` streichen. `pr-claim-delete.yaml` prüft, dass der PR nur das tut; ist die Prüfung grün, merged der Worker.
+5. Nach dessen Merge wartet `delete-claim-xr.yaml`, bis Flux den Merge-Commit angewendet hat, und löscht dann das XR (`kubectl delete --wait`).
+6. Später: Status und Ergebnis an Homerun.
+
+**Stand (2026-10-25):** live. Erster echter Durchlauf mit der Wegwerf-VM `claim-test1-vm`: Picker, beide PRs und der Merge durch den Worker liefen durch. Das Löschen des XR scheiterte vorher an einem mehrdeutigen `gitrepository` (auf machinery gibt es auch `gitrepositories.sops.stuttgart-things.com`). Der Fix ist stuttgart-things#4093. Fehlgeschlagene Läufe lassen sich jetzt per PR-Nummer wiederholen (`gh workflow run delete-claim-xr.yaml -f pr=<n>`).
+
+Abweichungen vom ersten Entwurf:
+
+- Das XR löscht ein GitHub-Workflow, nicht der Worker. Er hat die SOPS-Kubeconfig der Plane ohnehin, und der Worker braucht so keinen Zugriff auf machinery.
+- `ClusterStack` ist vorerst ausgeschlossen, im Picker (`excludeKinds`) und in `hack/claim-deletion.py` (`REFUSED`). Das Abschalten der Platform vor dem Löschen kommt später.
+- `request-claim-deletion` ist für alle Entwickler offen. Die Freigabe ist der Merge durch das Platform-Team; `delete-claim` selbst bleibt Platform-Team-only.
+- Erlaubte Verzeichnisse stehen fest in `hack/claim-deletion.py` (`PLANES`), heute nur `clusters/labda/vsphere/machinery-xrs`. Eine neue Plane braucht dort einen Eintrag mit Kubeconfig und Kustomization.
+- Bei einem `MinioBucket` bleibt der Bucket mit seinem Inhalt stehen (`deletionPolicy: Orphan`).
 
 **Warum diese Reihenfolge:** `machinery-xrs` pruned nicht. Wird das XR vor der Datei gelöscht, legt der nächste Abgleich es wieder an (so wurden labda-rancher-1/2 am 2026-10-02 neu gebaut).
 
@@ -160,6 +170,46 @@ Gelöscht wird über eine neue Backstage-Vorlage `request-claim-deletion` nach d
 - Backstage: Picker für Live-XRs, über den Proxy auf `machinery`.
 - Worker: Funktion `delete-claim` mit den Schritten 4 bis 6.
 - Danach: flux-Komponente `machinery-registry-api` und den Proxy `/machinery-registry` entfernen.
+
+Umgesetzt in machinery#106 (v1.15.0), sthings-backstage#193 (v1.19.0), flux#850 (v1.192.0) und stuttgart-things#4078 und #4093.
+
+## Ändern (Teil D)
+
+Ein bestellter Claim soll sich nachträglich ändern lassen, etwa eine VM von `medium` auf `large`. Der Weg ist derselbe wie beim Löschen: auswählen, PR auf die Datei, der Merge ist die Freigabe. Er ist kürzer, weil Flux die geänderte Datei einfach anwendet; einen zweiten Schritt auf dem Cluster gibt es nicht.
+
+```mermaid
+flowchart LR
+    pick["Backstage<br/>request-claim-change<br/>(Picker + erlaubte Felder)"] --> pr["PR auf die Datei<br/>unter source-path"]
+    pr --> check["pr-claim-change<br/>nur erlaubte Felder geändert?"]
+    check --> merge["Merge = Freigabe"]
+    merge --> flux["Flux wendet an,<br/>Crossplane gleicht ab"]
+```
+
+**Kein freies Bearbeiten.** Nicht jedes Feld ist harmlos:
+
+- CPU und RAM einer VM gehen meist nur mit Neustart.
+- Eine Disk lässt sich nur vergrößern.
+- `vm.name`, Template, Netzwerk oder `environmentConfig` bauen die VM im schlimmsten Fall neu oder lassen den Provider hängen. Ein Beispiel für Letzteres ist der MinIO-Username, den der Provider nicht ändern lässt (stuttgart-things#4081).
+
+Darum gibt es pro Kind eine Liste erlaubter Änderungen, als Code neben `hack/claim-deletion.py`:
+
+| Kind | Erlaubt | Regel |
+| --- | --- | --- |
+| NativeProxmoxVM, NativeVsphereVM | Größe (`vm.cpu`, `vm.memory`) | nur Werte aus den Größen der Bestellvorlage; Hinweis auf Neustart |
+| NativeProxmoxVM, NativeVsphereVM | `vm.disk` | nur größer |
+| ScheduledRun | Zeitplan, `suspend` | gültiger Cron-Ausdruck |
+| ClusterStack, MinioBucket | vorerst nichts | |
+
+**Ablauf:**
+
+1. Picker wie beim Löschen; die Vorlage zeigt nur die erlaubten Felder des gewählten Kinds, vorbelegt mit den aktuellen Werten aus machinery.
+2. Ein Skript patcht die Datei unter `source-path`, mit einem YAML-Parser, der Kommentare erhält, und öffnet den PR.
+3. `pr-claim-change.yaml` vergleicht alte und neue Datei und lehnt jede Änderung außerhalb der Liste ab.
+4. Merge, Flux, Crossplane. Ob die Änderung angekommen ist, zeigt machinery am Status des XR.
+
+Hier braucht es weder Dapr-Worker noch kubectl: Der PR ist schon die ganze Änderung. Die Vorlage kann ihn direkt öffnen (`publish:github:pull-request`).
+
+**Später sauberer:** Die Bestellung hält fest, aus welcher Vorlage und mit welchen Parametern sie entstanden ist (Annotation `stuttgart-things.com/order`). Eine Änderung rendert dann über claim-machinery-api neu, statt YAML zu patchen. Das passt zu Phase 3, in der claim-machinery-api ohnehin das Placement übernimmt.
 
 ## Migration (später)
 
@@ -190,13 +240,15 @@ Jede Phase liefert für sich etwas Nutzbares; die nächste beginnt erst, wenn di
 ```mermaid
 flowchart TB
     p0["<b>Phase 0 · source-path-Annotations (erledigt)</b><br/>Jedes XR in machinery-xrs nennt seine Datei; die CI prüft das (stuttgart-things#4073)<br/><i>Ergebnis: Objekt und Datei sind eindeutig verbunden</i>"]
-    p1["<b>Phase 1 · Löschen über Backstage</b><br/>JSON-Endpunkt in machinery, Picker auf Live-XRs, Vorlage request-claim-deletion, Worker delete-claim<br/><i>Ergebnis: Claims auf machinery per PR löschbar; Reste der registry-api entfernt</i>"]
+    p1["<b>Phase 1 · Löschen über Backstage (live)</b><br/>JSON-Endpunkt in machinery, Picker auf Live-XRs, Vorlage request-claim-deletion, Worker delete-claim<br/><i>Ergebnis: Claims auf machinery per PR löschbar; Reste der registry-api entfernt</i>"]
+    p1b["<b>Phase 1b · Ändern über Backstage</b><br/>Vorlage request-claim-change mit erlaubten Feldern pro Kind, PR-Prüfung pr-claim-change<br/><i>Ergebnis: VM-Größe, Disk, Zeitplan per PR änderbar</i>"]
     p2["<b>Phase 2 · Fleet-Registrierung</b><br/>Eine Datei pro Plane; ein Exporter meldet XRDs, EnvironmentConfigs, ProviderConfigs, Gesundheit<br/><i>Ergebnis: eine Liste aller Planes mit dem, was sie können</i>"]
     p3["<b>Phase 3 · Placement beim Bestellen</b><br/>Filter und Bewertung als Schritt in claim-machinery-api; Backstage und claims nutzen ihn<br/><i>Ergebnis: neue Claims landen auf der passenden Plane, mit Begründung im PR</i>"]
     p4["<b>Phase 4 · Operator und GUI</b><br/>CRD ClaimRequest mit Status, ein Operator gleicht ab; Ansicht in der HTMX-Oberfläche von machinery<br/><i>Ergebnis: Requests über alle Planes verfolgbar, nicht nur als PR</i>"]
     p5["<b>Phase 5 · Drain und Migration</b><br/>Manuelles Leerräumen einer Plane, nur für Kinds mit importierbaren IDs (movable: true)<br/><i>Ergebnis: Plane austauschbar, ohne VMs neu zu bauen; Automatik erst danach</i>"]
-    p0 --> p1 --> p2 --> p3 --> p4 --> p5
+    p0 --> p1 --> p1b --> p2 --> p3 --> p4 --> p5
     style p0 stroke:#2e7d32,stroke-width:2px
+    style p1 stroke:#2e7d32,stroke-width:2px
 ```
 
 Phase 1 baut auf Phase 0 auf und braucht noch keinen Scheduler; der Operator kommt erst in Phase 4, wenn Requests einen eigenen Status brauchen.
@@ -207,4 +259,6 @@ Phase 1 baut auf Phase 0 auf und braucht noch keinen Scheduler; der Operator kom
 - [ ] machinery im Multi-Cluster-Modus oder ein Exporter pro Plane? Ersteres braucht Kubeconfigs aller Planes an einer Stelle.
 - [ ] crossplane-mgmt liegt im harvester-Repo: bleibt das so, oder ziehen alle Plane-Verzeichnisse in ein Repo?
 - [ ] Wer löscht auf crossplane-mgmt: derselbe Dapr-Worker oder ein eigener?
+- [ ] Ändern: VM-Größe als Größenname (`medium`, `large`) in der Bestellung festhalten oder nur cpu/memory? Ersteres macht die Liste erlaubter Werte einfacher.
+- [ ] ClusterStack löschen: wann, und mit welchem Ablauf zum Abschalten der Platform?
 - [ ] Brauchen Requests einen eigenen Status (CRD `ClaimRequest`), oder reicht der PR als Status bis zur Operator-Phase?
