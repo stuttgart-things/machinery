@@ -41,6 +41,9 @@ kcl_options:
     value: machinery
   - key: config.httpEnabled
     value: True
+  # serve the UI under /machinery behind sthings-portal (BASE_PATH)
+  - key: config.basePath
+    value: /machinery
   - key: config.httpRouteEnabled
     value: True
   - key: config.httpRouteParentRefName

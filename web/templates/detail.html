@@ -1,6 +1,6 @@
 <div class="detail-view">
     <button class="back-btn"
-            hx-get="/resources?kind=*"
+            hx-get="{{base}}/resources?kind=*"
             hx-target="#resource-list"
             hx-push-url="false">
         &larr; Back to list
@@ -54,7 +54,7 @@
     </div>
 
     <div class="detail-refresh"
-         hx-get="/detail?kind={{.Resource.Kind}}&name={{.Resource.Name}}&namespace={{.Resource.Namespace}}"
+         hx-get="{{base}}/detail?kind={{.Resource.Kind}}&name={{.Resource.Name}}&namespace={{.Resource.Namespace}}"
          hx-target="#resource-list"
          hx-trigger="every 5s">
     </div>

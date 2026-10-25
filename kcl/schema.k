@@ -2,6 +2,8 @@
 Schema definition for machinery deployment configuration
 """
 
+import regex
+
 schema Machinery:
     """Configuration for machinery Kubernetes deployment"""
 
@@ -26,6 +28,10 @@ schema Machinery:
     # HTTP server (HTMX frontend)
     httpPort: int = 8080
     httpEnabled: bool = False
+    # Prefix the UI answers under behind sthings-portal, e.g. "/machinery"
+    # (BASE_PATH). Empty serves it at the root. /health and /api/v1/resources
+    # stay at the root either way.
+    basePath: str = ""
 
     # Service
     serviceType: str = "ClusterIP"
@@ -72,5 +78,6 @@ schema Machinery:
         replicas >= 0, "replicas must be >= 0"
         grpcPort >= 1 and grpcPort <= 65535, "grpcPort must be valid"
         httpPort >= 1 and httpPort <= 65535, "httpPort must be valid"
+        not basePath or regex.match(basePath, r"^(/[A-Za-z0-9._~-]+)+$"), "basePath must be empty or /segment[/segment...] without a trailing slash"
         name != "", "name must not be empty"
         namespace != "", "namespace must not be empty"

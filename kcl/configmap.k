@@ -19,6 +19,8 @@ envConfigMap = {
     }
     data: {
         LOG_LEVEL: "info"
+        if config.basePath:
+            BASE_PATH: config.basePath
         **config.extraEnvVars
     }
 }

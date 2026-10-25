@@ -19,6 +19,9 @@ var templateFS embed.FS
 type webServer struct {
 	srv       *server
 	templates *template.Template
+	// basePath is the prefix the UI answers under ("" or e.g. "/machinery"),
+	// see parseBasePath. Templates read it through the "base" func.
+	basePath string
 }
 
 type buildInfo struct {
@@ -56,12 +59,35 @@ type detailData struct {
 	Resource resourceData
 }
 
-func newWebServer(srv *server) (*webServer, error) {
-	tmpl, err := template.ParseFS(templateFS, "web/templates/*.html")
+func newWebServer(srv *server, basePath string) (*webServer, error) {
+	tmpl, err := template.New("").
+		Funcs(template.FuncMap{"base": func() string { return basePath }}).
+		ParseFS(templateFS, "web/templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parsing templates: %w", err)
 	}
-	return &webServer{srv: srv, templates: tmpl}, nil
+	return &webServer{srv: srv, templates: tmpl, basePath: basePath}, nil
+}
+
+// parseBasePath checks the BASE_PATH a reverse proxy (sthings-portal) serves
+// the UI under. The proxy forwards the path unchanged, so machinery answers
+// under the prefix itself and puts it on every URL it hands to the browser.
+// "" (or "/") means no prefix; otherwise it is "/" plus path segments, without
+// a trailing slash.
+func parseBasePath(v string) (string, error) {
+	v = strings.TrimSuffix(strings.TrimSpace(v), "/")
+	if v == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(v, "/") {
+		return "", fmt.Errorf("BASE_PATH %q must start with /", v)
+	}
+	for _, seg := range strings.Split(v[1:], "/") {
+		if seg == "" || seg == "." || seg == ".." || strings.ContainsAny(seg, "?#%{}\\ \t") {
+			return "", fmt.Errorf("BASE_PATH %q is not a clean path", v)
+		}
+	}
+	return v, nil
 }
 
 func (w *webServer) handler() http.Handler {
@@ -71,7 +97,18 @@ func (w *webServer) handler() http.Handler {
 	mux.HandleFunc("GET /detail", w.handleDetail)
 	mux.HandleFunc("GET /health", w.handleHealth)
 	mux.HandleFunc("GET /api/v1/resources", w.handleAPIResources)
-	return mux
+	if w.basePath == "" {
+		return mux
+	}
+
+	// Everything answers under the prefix. /health (the portal polls the
+	// service root) and the JSON API (in-cluster clients such as the
+	// Backstage claim picker) stay at the root as well.
+	root := http.NewServeMux()
+	root.Handle(w.basePath+"/", http.StripPrefix(w.basePath, mux))
+	root.HandleFunc("GET /health", w.handleHealth)
+	root.HandleFunc("GET /api/v1/resources", w.handleAPIResources)
+	return root
 }
 
 func (w *webServer) handleIndex(rw http.ResponseWriter, r *http.Request) {
