@@ -1,3 +1,15 @@
+# [1.16.0](https://github.com/stuttgart-things/machinery/compare/v1.15.0...v1.16.0) (2026-10-25)
+
+
+### Bug Fixes
+
+* **deps:** update module google.golang.org/grpc to v1.84.0 ([#102](https://github.com/stuttgart-things/machinery/issues/102)) ([4c3abc6](https://github.com/stuttgart-things/machinery/commit/4c3abc60d9c923cc4d3dca88074002ecb863d200))
+
+
+### Features
+
+* serve the web UI under BASE_PATH for sthings-portal ([#111](https://github.com/stuttgart-things/machinery/issues/111)) ([f9a3aaf](https://github.com/stuttgart-things/machinery/commit/f9a3aafc660f0af4d398f60cfe7ef440bcd21581))
+
 # [1.15.0](https://github.com/stuttgart-things/machinery/compare/v1.14.1...v1.15.0) (2026-10-24)
 
 
