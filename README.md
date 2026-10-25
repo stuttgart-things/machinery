@@ -73,6 +73,12 @@ and puts it on every URL it hands to the browser.
 The value must be empty or `/segment[/segment…]`; anything else fails
 startup.
 
+Inside the portal's frame the dashboard drops its title and footer and shows
+one compact line (the portal names the service), with the refresh controls
+on the right. A request through the portal (`X-Forwarded-Prefix`) links the
+portal's design tokens (`/static/homerun2-tokens.css`), which the colours are
+built on; opened on its own the page looks as before.
+
 ## gRPC API
 
 ```protobuf
