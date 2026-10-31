@@ -154,6 +154,15 @@ Gelöscht wird über eine neue Backstage-Vorlage `request-claim-deletion` nach d
 
 **Stand (2026-10-25):** live. Erster echter Durchlauf mit der Wegwerf-VM `claim-test1-vm`: Picker, beide PRs und der Merge durch den Worker liefen durch. Das Löschen des XR scheiterte vorher an einem mehrdeutigen `gitrepository` (auf machinery gibt es auch `gitrepositories.sops.stuttgart-things.com`). Der Fix ist stuttgart-things#4093. Fehlgeschlagene Läufe lassen sich jetzt per PR-Nummer wiederholen (`gh workflow run delete-claim-xr.yaml -f pr=<n>`).
 
+**Stand (2026-10-28):** Der zweite Durchlauf mit `cutover3-vm` (stuttgart-things#4138) hat zwei Lücken gezeigt. Beide sind geschlossen:
+
+- **Der Worker wartet auf laufende Checks.** `pr-claim-delete.yaml` war grün, `validate-templates` wartete aber noch auf einen Runner. Der Worker prüft vor dem Merge alle Checks am PR-Head und lehnte deshalb sofort ab (`merge-refused`). Seit dapr-workflows#72 (ausgerollt mit argocd#771) fragt er alle 30 s erneut, bis `watch.timeoutMin` abgelaufen ist. Ein roter Check blockt weiter sofort, auch wenn andere Checks noch laufen.
+- **Einmal-Läufe gehen mit dem Claim.** Gelöscht wurde nur die Claim-Datei. Der Resize-Lauf `resize-cutover3-vm` blieb liegen und lief alle 10 min gegen ein XR, das es nicht mehr gab. Seit stuttgart-things#4143 sieht das so aus:
+  - `hack/claim-deletion.py remove` nimmt die ScheduledRuns mit `stuttgart-things.com/applies: <Kind>/<ns>/<name>` in denselben PR.
+  - `pr-claim-delete.yaml` lehnt eine Löschung ab, die einen solchen Lauf zurücklässt.
+  - `delete-claim-xr.yaml` löscht erst die ScheduledRuns, dann die AnsibleRuns mit dem Label `applies=<name>`, zuletzt das XR. Die AnsibleRuns gibt es nur im Cluster.
+  - Die Reihenfolge ist wichtig. Fehlt nur der AnsibleRun, ruft der nächste Tick das XR erneut ab. Seit stuttgart-things#4148 beendet er sich dann sauber, wenn das XR fehlt.
+
 Abweichungen vom ersten Entwurf:
 
 - Das XR löscht ein GitHub-Workflow, nicht der Worker. Er hat die SOPS-Kubeconfig der Plane ohnehin, und der Worker braucht so keinen Zugriff auf machinery.
@@ -213,14 +222,14 @@ Hier braucht es weder Dapr-Worker noch kubectl: Der PR ist schon die ganze Ände
 
 ### Im Gast ankommen: Einmal-Lauf
 
-Was Crossplane an der VM ändert, kommt nicht vollständig im Gast an. Auf Proxmox wirken zusätzliche CPU und zusätzlicher RAM erst nach dem nächsten Neustart (`rebootAfterUpdate: false`). Eine größere Disk steckt bei beiden Providern noch nicht in Partition, LVM und Dateisystemen. Deshalb kann eine Größenänderung einen **Einmal-Lauf** mitbringen (stuttgart-things#4106):
+Was Crossplane an der VM ändert, kommt nicht vollständig im Gast an. Auf Proxmox wirken zusätzliche CPU und zusätzlicher RAM erst nach einem Neustart **vom Host aus** (`rebootAfterUpdate: false`). Ein Neustart im Gast reicht dafür nicht. Beim ersten Test zeigte der Gast danach weiter 4 vCPU. Der vSphere-Provider schaltet die VM selbst aus und wieder ein, wenn Hot-Add aus ist. Eine größere Disk steckt bei beiden Providern noch nicht in Partition, LVM und Dateisystemen. Deshalb kann eine Größenänderung einen **Einmal-Lauf** mitbringen (stuttgart-things#4106):
 
 ```mermaid
 flowchart LR
     pr["PR change-claim/&lt;vm&gt;<br/>VM-Datei + resize-&lt;vm&gt;.yaml"] --> merge["Merge"]
     merge --> sr["ScheduledRun, alle 10 min:<br/>im Fenster? schon gelaufen?<br/>Größe angewendet? Synced/Ready? IP?"]
     sr -->|"einmal"| ar["AnsibleRun<br/>sthings.baseos.resize_vm"]
-    ar --> guest["Neustart (Proxmox),<br/>dann manage_filesystem"]
+    ar --> guest["Neustart über die Proxmox-API,<br/>Prüfung CPU/RAM, dann manage_filesystem"]
     sr -->|"nach expires"| exp["expire-run-once.yaml:<br/>Löschen über delete-claim"]
 ```
 
@@ -234,7 +243,10 @@ flowchart LR
 - **Nur einmal:** Der Name des AnsibleRun steht vorher fest (`resize-<vm>-<Start>`). Existiert es, beendet sich jeder weitere Tick.
 - **Erst wenn die Größe angekommen ist:** Das XR muss die neue Größe tragen, und jede komponierte Ressource muss `Synced` und `Ready` bei ihrer aktuellen `generation` sein.
 - **Kein Bauen von Hand:** Die Datei rendert `hack/claim-change.py` aus `hack/claim-change-run.yaml`. `pr-claim-change.yaml` rendert sie nach und lehnt jede Abweichung ab.
-- **Aufräumen:** Abgelaufene Läufe löscht nachts `expire-run-once.yaml`, über den Lösch-Weg aus Teil C: zuerst die Datei, dann das Objekt, gemergt erst bei grüner Prüfung.
+- **Neustart vom Host:** Auf Proxmox startet `sthings.baseos.resize_vm` die VM über die API neu (`POST …/qemu/<vmid>/status/reboot`, ab baseos 26.1025.1510). Danach wartet es auf die Verbindung und bricht ab, wenn der Gast nicht die neue CPU- und RAM-Größe zeigt. Erst dann vergrößert es Partition, LVM und Dateisysteme. Node und vmid liest der Tick aus dem EnvironmentVM. Der Token ist `sthings_automation@pve!machineyResize`, mit der Rolle `SVAsthingsMachineryResize` (VM.Audit, VM.PowerMgmt) auf `/vms`. Er liegt als Secret `proxmox-resize-token` in `tekton-ci` (stuttgart-things#4112, angelegt mit `hack/setup-proxmox-resize-token.py`). Auf vSphere vergrößert der Lauf nur die Dateisysteme.
+- **Aufräumen:** Abgelaufene Läufe löscht `expire-run-once.yaml` einmal am Tag, über den Lösch-Weg aus Teil C: zuerst die Datei, dann das Objekt, gemergt erst bei grüner Prüfung. Der Cron steht auf 02:30 UTC, GitHub führt ihn aber erst gegen 08:00–09:00 UTC aus. Wird der Claim gelöscht, gehen seine Läufe mit ihm (Teil C).
+
+**Stand (2026-10-28):** live. Mit `cutover3-vm` und Neustart vom Host: vorher 4 vCPU / 7423 MiB, danach 8 vCPU / 15474 MiB, `failed=0` (stuttgart-things#4112). Den abgelaufenen Lauf hat `expire-run-once.yaml` am 2026-10-28 über stuttgart-things#4163 gelöscht. Der PR wurde automatisch gemergt, danach hat `delete-claim-xr.yaml` das Objekt gelöscht.
 
 **Später sauberer:** Die Bestellung hält fest, aus welcher Vorlage und mit welchen Parametern sie entstanden ist (Annotation `stuttgart-things.com/order`). Eine Änderung rendert dann über claim-machinery-api neu, statt YAML zu patchen. Das passt zu Phase 3, in der claim-machinery-api ohnehin das Placement übernimmt.
 
@@ -276,6 +288,7 @@ flowchart TB
     p0 --> p1 --> p1b --> p2 --> p3 --> p4 --> p5
     style p0 stroke:#2e7d32,stroke-width:2px
     style p1 stroke:#2e7d32,stroke-width:2px
+    style p1b stroke:#2e7d32,stroke-width:2px
 ```
 
 Phase 1 baut auf Phase 0 auf und braucht noch keinen Scheduler; der Operator kommt erst in Phase 4, wenn Requests einen eigenen Status brauchen.
