@@ -686,7 +686,7 @@ func getStatusDetails(obj *unstructured.Unstructured, fields []string) string {
 func getInfoFields(obj *unstructured.Unstructured, fields []InfoField) map[string]string {
 	result := make(map[string]string)
 	for _, f := range fields {
-		val := getNestedField(obj, f.Path)
+		val := getInfoField(obj, f.Path)
 		if val != "" {
 			result[f.Label] = val
 		}
@@ -863,6 +863,65 @@ func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
 	}
 
 	return ""
+}
+
+// getInfoField is getNestedField plus maps (machinery#117): a map of
+// scalars, e.g. metadata.labels, renders as "k=v" pairs sorted by key. A
+// client can then match labels (an XR selects its EnvironmentConfig by a
+// label value), which a dot-path cannot address: label keys contain dots.
+// Label values never contain "," or "=", so splitting is unambiguous for
+// labels; annotations may contain both. Maps with a nested value (a whole
+// spec block) stay empty, as before.
+//
+// Info fields only: connection and status fields are joined into
+// connection_details as "label=value, ...", where a map's own pairs would
+// be ambiguous.
+func getInfoField(obj *unstructured.Unstructured, fieldPath string) string {
+	if v := getNestedField(obj, fieldPath); v != "" {
+		return v
+	}
+	m, found, err := unstructured.NestedMap(obj.Object, strings.Split(fieldPath, ".")...)
+	if err != nil || !found {
+		return ""
+	}
+	return renderScalarMap(m)
+}
+
+// maxMapFieldBytes caps a rendered map, like Condition.message.
+const maxMapFieldBytes = 1024
+
+// renderScalarMap renders m as sorted "k=v" pairs, or "" when m is empty
+// or holds a non-scalar value.
+func renderScalarMap(m map[string]any) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k, v := range m {
+		switch v.(type) {
+		case string, bool, int64, int32, int, float64:
+		default:
+			return ""
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s=%v", k, m[k])
+	}
+	out := b.String()
+	if len(out) > maxMapFieldBytes {
+		cut := maxMapFieldBytes - len(conditionTruncationMarker)
+		for cut > 0 && !utf8.RuneStart(out[cut]) {
+			cut--
+		}
+		out = out[:cut] + conditionTruncationMarker
+	}
+	return out
 }
 
 func summarizeRef(m map[string]any) string {

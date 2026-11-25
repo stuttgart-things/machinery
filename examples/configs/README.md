@@ -30,7 +30,17 @@ the dashboard.
 Dot-paths support `string`, `bool`, and `int64` scalars, plus slices:
 `[]string` joins comma-separated (e.g. `spec.hostnames`), `[]map`
 collapses to `namespace/name` pairs when the items carry those keys
-(e.g. `spec.parentRefs`). Missing paths render as empty. Array
+(e.g. `spec.parentRefs`). In **info fields only**, a map of scalars
+renders as `k=v` pairs sorted by key, joined with `, ` and capped at
+1 KiB, e.g. `metadata.labels` →
+`app.kubernetes.io/managed-by=flux, proxmox-vm.resources.stuttgart-things.com/environment=labul`
+— the way to read labels, whose keys contain dots and cannot be a
+dot-path. Splitting on `, ` and then the first `=` is unambiguous for
+labels (their values never contain `,` or `=`); annotations may contain
+both. A map with a nested value (a whole spec block) and an empty map
+render as empty. Connection and status fields do not render maps:
+they are joined into `connection_details` as `label=value, …`, where a
+map's own pairs would be ambiguous. Missing paths render as empty. Array
 indexing (`spec.parentRefs[0].name`) is not supported — point at the
 parent path and let the renderer flatten it. For `status.conditions`
 there is no need for an info field: every `ResourceStatus` already
