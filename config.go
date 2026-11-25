@@ -20,6 +20,15 @@ type ResourceKind struct {
 	ConnectionField string      `json:"connectionField,omitempty"` // dot-separated path, e.g. "status.share.ips"
 	StatusFields    []string    `json:"statusFields,omitempty"`    // extra status fields to display
 	InfoFields      []InfoField `json:"infoFields,omitempty"`      // additional fields for detail view
+	// ReadyConditions (#119): the kind is ready when ALL of these
+	// status.conditions are True, e.g. ["Installed", "Healthy"] for
+	// Crossplane packages or ["Established"] for XRDs. Empty = ["Ready"],
+	// the kubernetes/crossplane convention.
+	ReadyConditions []string `json:"readyConditions,omitempty"`
+	// ReadyWithoutStatus (#119): an object with neither status.conditions
+	// nor status.parents counts as ready ("no status"), for kinds that only
+	// carry data, e.g. EnvironmentConfig.
+	ReadyWithoutStatus bool `json:"readyWithoutStatus,omitempty"`
 }
 
 type Config struct {
@@ -79,16 +88,16 @@ func defaultConfig() *Config {
 				StatusFields:    []string{"status.volume.ready", "status.cloudInit.ready", "status.vm.ready"},
 			},
 			"StoragePlatform": {
-				Group:           "resources.stuttgart-things.com",
-				Version:         "v1alpha1",
-				Resource:        "storageplatforms",
-				StatusFields:    []string{"status.installed", "status.observedVersion"},
+				Group:        "resources.stuttgart-things.com",
+				Version:      "v1alpha1",
+				Resource:     "storageplatforms",
+				StatusFields: []string{"status.installed", "status.observedVersion"},
 			},
 			"NetworkIntegration": {
-				Group:           "resources.stuttgart-things.com",
-				Version:         "v1alpha1",
-				Resource:        "networkintegrations",
-				StatusFields:    []string{"status.installed", "status.observedVersion"},
+				Group:        "resources.stuttgart-things.com",
+				Version:      "v1alpha1",
+				Resource:     "networkintegrations",
+				StatusFields: []string{"status.installed", "status.observedVersion"},
 			},
 		},
 	}

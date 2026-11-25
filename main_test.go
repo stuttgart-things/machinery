@@ -1069,3 +1069,103 @@ func TestGetInfoFieldMaps(t *testing.T) {
 		}
 	})
 }
+
+// TestGetResourceStatusFor: per-kind readiness (#119).
+func TestGetResourceStatusFor(t *testing.T) {
+	conds := func(cs ...map[string]any) *unstructured.Unstructured {
+		items := make([]any, len(cs))
+		for i, c := range cs {
+			items[i] = c
+		}
+		return &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "x"},
+			"status":   map[string]any{"conditions": items},
+		}}
+	}
+	c := func(typ, status, reason, msg string) map[string]any {
+		return map[string]any{"type": typ, "status": status, "reason": reason, "message": msg}
+	}
+	pkg := ResourceKind{ReadyConditions: []string{"Installed", "Healthy"}}
+	noStatus := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "env"}, "data": map[string]any{"a": "b"}}}
+
+	tests := []struct {
+		name      string
+		obj       *unstructured.Unstructured
+		rk        ResourceKind
+		wantMsg   string
+		wantReady bool
+	}{
+		{"all listed True", conds(c("Installed", "True", "", ""), c("Healthy", "True", "", "")), pkg, "Ready", true},
+		{"one False, message", conds(c("Installed", "True", "", ""), c("Healthy", "False", "UnhealthyPackageRevision", "node already exists")), pkg, "Healthy: node already exists", false},
+		{"one False, reason only", conds(c("Installed", "False", "InactivePackageRevision", ""), c("Healthy", "True", "", "")), pkg, "Installed: InactivePackageRevision", false},
+		{"one Unknown, nothing else", conds(c("Installed", "True", "", ""), map[string]any{"type": "Healthy", "status": "Unknown"}), pkg, "Healthy: Unknown", false},
+		{"listed condition missing", conds(c("Installed", "True", "", "")), pkg, "Healthy: not reported", false},
+		{"XRD Established", conds(c("Established", "True", "", ""), c("Offered", "False", "", "")), ResourceKind{ReadyConditions: []string{"Established"}}, "Ready", true},
+		{"default still Ready", conds(c("Ready", "True", "", "")), ResourceKind{}, "Ready", true},
+		{"default ignores Healthy", conds(c("Healthy", "True", "", "")), ResourceKind{}, "Not Ready", false},
+		{"no status, flag", noStatus, ResourceKind{ReadyWithoutStatus: true}, "no status", true},
+		{"no status, no flag", noStatus, ResourceKind{}, "No conditions found", false},
+		{"no status, readyConditions without flag", noStatus, pkg, "No conditions found", false},
+		{"flag, but conditions present", conds(c("Ready", "False", "", "")), ResourceKind{ReadyWithoutStatus: true}, "Not Ready", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ready := getResourceStatusFor(tt.obj, tt.rk)
+			if msg != tt.wantMsg || ready != tt.wantReady {
+				t.Errorf("got (%q, %v), want (%q, %v)", msg, ready, tt.wantMsg, tt.wantReady)
+			}
+		})
+	}
+
+	t.Run("gateway api unchanged", func(t *testing.T) {
+		route := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": "r"},
+			"status": map[string]any{"parents": []any{map[string]any{"conditions": []any{
+				map[string]any{"type": "Accepted", "status": "True"},
+				map[string]any{"type": "ResolvedRefs", "status": "True"},
+			}}}},
+		}}
+		m1, r1 := getResourceStatus(route)
+		m2, r2 := getResourceStatusFor(route, ResourceKind{ReadyWithoutStatus: true})
+		if m1 != m2 || r1 != r2 || !r1 {
+			t.Errorf("getResourceStatus %q/%v, getResourceStatusFor %q/%v", m1, r1, m2, r2)
+		}
+	})
+}
+
+// TestOwnerReferencesControllerOnly (#119).
+func TestOwnerReferencesControllerOnly(t *testing.T) {
+	ref := func(kind, name string, controller any) map[string]any {
+		m := map[string]any{"kind": kind, "name": name}
+		if controller != nil {
+			m["controller"] = controller
+		}
+		return m
+	}
+	obj := func(refs ...any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "x", "ownerReferences": refs}}}
+	}
+	tests := []struct {
+		name string
+		obj  *unstructured.Unstructured
+		want string
+	}{
+		{"controller present", obj(ref("ConfigurationRevision", "proxmoxvm-14cbaf19a891", true), ref("Configuration", "proxmoxvm", false)), "proxmoxvm-14cbaf19a891"},
+		{"no controller", obj(ref("Configuration", "a", false), ref("Configuration", "b", nil)), "a, b"},
+		{"several controllers", obj(ref("X", "c1", true), ref("Y", "o", false), ref("Z", "c2", true)), "c1, c2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getNestedField(tt.obj, "metadata.ownerReferences"); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+	// parentRefs carry no controller key: unchanged
+	routes := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"parentRefs": []any{
+		map[string]any{"name": "gw-a", "namespace": "default"}, map[string]any{"name": "gw-b"},
+	}}}}
+	if got := getNestedField(routes, "spec.parentRefs"); got != "default/gw-a, gw-b" {
+		t.Errorf("parentRefs %q", got)
+	}
+}
