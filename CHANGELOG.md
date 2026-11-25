@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/stuttgart-things/machinery/compare/v1.17.0...v1.18.0) (2026-11-25)
+
+
+### Features
+
+* render maps of scalars in info fields, e.g. metadata.labels ([#118](https://github.com/stuttgart-things/machinery/issues/118)) ([9faa9cf](https://github.com/stuttgart-things/machinery/commit/9faa9cf821bc1bb80eb819ad4610c07cb69bf48e))
+
 # [1.17.0](https://github.com/stuttgart-things/machinery/compare/v1.16.0...v1.17.0) (2026-10-25)
 
 
