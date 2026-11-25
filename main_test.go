@@ -1001,3 +1001,71 @@ func TestGetResourceDetail_CarriesConditions(t *testing.T) {
 		t.Errorf("generation=%d observed=%d, want 2/2", resp.Generation, resp.ObservedGeneration)
 	}
 }
+
+// TestGetInfoFieldMaps: info fields render maps of scalars as sorted k=v
+// pairs (machinery#117); connection and status fields do not.
+func TestGetInfoFieldMaps(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{
+			"name": "proxmox-vm-labul",
+			"labels": map[string]any{
+				"proxmox-vm.resources.stuttgart-things.com/environment": "labul",
+				"app.kubernetes.io/managed-by":                          "flux",
+			},
+			"annotations": map[string]any{},
+		},
+		"spec": map[string]any{
+			"mixed":   map[string]any{"replicas": int64(3), "enabled": true, "ratio": 0.5},
+			"nested":  map[string]any{"vm": map[string]any{"cpu": int64(2)}},
+			"partial": map[string]any{"a": "x", "b": []any{"y"}},
+		},
+	}}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"labels", "metadata.labels", "app.kubernetes.io/managed-by=flux, proxmox-vm.resources.stuttgart-things.com/environment=labul"},
+		{"scalars of every kind", "spec.mixed", "enabled=true, ratio=0.5, replicas=3"},
+		{"empty map", "metadata.annotations", ""},
+		{"nested map stays empty", "spec.nested", ""},
+		{"map with a slice stays empty", "spec.partial", ""},
+		{"scalar unchanged", "metadata.name", "proxmox-vm-labul"},
+		{"missing", "metadata.labels.nope", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getInfoField(obj, tt.path); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("status and connection fields do not render maps", func(t *testing.T) {
+		if got := getNestedField(obj, "metadata.labels"); got != "" {
+			t.Errorf("getNestedField(map) = %q, want empty", got)
+		}
+		if got := getStatusDetails(obj, []string{"metadata.labels"}); got != "" {
+			t.Errorf("status details = %q, want empty", got)
+		}
+	})
+
+	t.Run("info fields", func(t *testing.T) {
+		got := getInfoFields(obj, []InfoField{{Label: "Labels", Path: "metadata.labels"}})
+		if got["Labels"] != "app.kubernetes.io/managed-by=flux, proxmox-vm.resources.stuttgart-things.com/environment=labul" {
+			t.Errorf("info fields %v", got)
+		}
+	})
+
+	t.Run("capped", func(t *testing.T) {
+		big := map[string]any{}
+		for i := 0; i < 200; i++ {
+			big[fmt.Sprintf("key-%03d", i)] = strings.Repeat("v", 20)
+		}
+		got := renderScalarMap(big)
+		if len(got) > maxMapFieldBytes || !strings.HasSuffix(got, conditionTruncationMarker) || !strings.HasPrefix(got, "key-000=") {
+			t.Errorf("len %d, suffix %q", len(got), got[len(got)-8:])
+		}
+	})
+}
