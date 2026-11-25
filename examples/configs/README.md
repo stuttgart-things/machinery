@@ -58,6 +58,30 @@ is `True`, otherwise surfaces the first non-`True` condition as
 `<Type>: <Reason>`. No config knob — the fallback engages whenever
 flat `status.conditions` is absent.
 
+Kinds that follow neither convention set their own rule per kind
+(#119):
+
+```json
+"Provider": { "group": "pkg.crossplane.io", "version": "v1", "resource": "providers",
+              "readyConditions": ["Installed", "Healthy"] },
+"CompositeResourceDefinition": { …, "readyConditions": ["Established"] },
+"EnvironmentConfig": { …, "readyWithoutStatus": true }
+```
+
+- `readyConditions`: Ready when **all** listed `status.conditions` are
+  `True`; otherwise the first one that is not, as `<Type>: <message>`
+  (or its reason, or its status), and `<Type>: not reported` when it is
+  missing. Empty means `["Ready"]`, as above.
+- `readyWithoutStatus`: an object with neither `status.conditions` nor
+  `status.parents` is Ready with the message `no status`, for kinds that
+  only carry data. Default `false` (`No conditions found`, not ready).
+
+For `metadata.ownerReferences` as a field, only the entries with
+`controller: true` are rendered when there are any — for an XRD that is
+its ConfigurationRevision, not also the Configuration. A list without a
+controller entry (or any other list of references, e.g. `parentRefs`)
+renders in full.
+
 ## Deploying a config
 
 ### Option A — flux / kustomize (any cluster)

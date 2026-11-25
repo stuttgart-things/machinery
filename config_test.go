@@ -146,3 +146,24 @@ func writeTestFile(t *testing.T, name, content string) string {
 	}
 	return path
 }
+
+func TestLoadConfigReadiness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"resources": {
+	  "Provider": {"group": "pkg.crossplane.io", "version": "v1", "resource": "providers", "readyConditions": ["Installed", "Healthy"]},
+	  "EnvironmentConfig": {"group": "apiextensions.crossplane.io", "version": "v1beta1", "resource": "environmentconfigs", "readyWithoutStatus": true}
+	}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Resources["Provider"].ReadyConditions; len(got) != 2 || got[0] != "Installed" || got[1] != "Healthy" {
+		t.Errorf("readyConditions %v", got)
+	}
+	if !cfg.Resources["EnvironmentConfig"].ReadyWithoutStatus || cfg.Resources["Provider"].ReadyWithoutStatus {
+		t.Errorf("readyWithoutStatus %+v", cfg.Resources)
+	}
+}

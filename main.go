@@ -405,7 +405,7 @@ func (s *server) resolveKinds(kind string) ([]string, error) {
 // ResourceStatus, applying the kind's connection/status/info field
 // mappings. Shared by GetResources, GetResourceDetail and the watch.
 func toResourceStatus(item *unstructured.Unstructured, kind string, rk ResourceKind) *resourceservice.ResourceStatus {
-	statusMessage, ready := getResourceStatus(item)
+	statusMessage, ready := getResourceStatusFor(item, rk)
 	connDetails := getConnectionDetails(item, rk.ConnectionField)
 	if len(rk.StatusFields) > 0 {
 		if extra := getStatusDetails(item, rk.StatusFields); extra != "" {
@@ -594,6 +594,49 @@ func (s *server) GetResources(ctx context.Context, req *resourceservice.Resource
 
 	slog.Info("resources fetched", "count", len(allResources))
 	return &resourceservice.ResourceListResponse{Resources: allResources}, nil
+}
+
+// getResourceStatusFor applies the kind's readiness rules (#119) on top of
+// getResourceStatus: ReadyConditions replaces the single "Ready" type,
+// ReadyWithoutStatus accepts an object that reports no status at all.
+func getResourceStatusFor(obj *unstructured.Unstructured, rk ResourceKind) (string, bool) {
+	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil {
+		return fmt.Sprintf("Error reading conditions: %v", err), false
+	}
+	if !found && rk.ReadyWithoutStatus {
+		if _, parents, _ := unstructured.NestedSlice(obj.Object, "status", "parents"); !parents {
+			return "no status", true
+		}
+	}
+	if len(rk.ReadyConditions) == 0 || !found {
+		return getResourceStatus(obj)
+	}
+	byType := map[string]map[string]any{}
+	for _, c := range conditions {
+		if cm, ok := c.(map[string]any); ok {
+			if t, _ := cm["type"].(string); t != "" {
+				byType[t] = cm
+			}
+		}
+	}
+	for _, t := range rk.ReadyConditions {
+		cm, ok := byType[t]
+		if !ok {
+			return t + ": not reported", false
+		}
+		if cm["status"] != "True" {
+			detail, _ := cm["message"].(string)
+			if detail == "" {
+				detail, _ = cm["reason"].(string)
+			}
+			if detail == "" {
+				detail = fmt.Sprintf("%v", cm["status"])
+			}
+			return t + ": " + detail, false
+		}
+	}
+	return "Ready", true
 }
 
 func getResourceStatus(obj *unstructured.Unstructured) (string, bool) {
@@ -848,6 +891,7 @@ func getNestedField(obj *unstructured.Unstructured, fieldPath string) string {
 	// namespace/name pairs so the UI shows something usable.
 	slice, found, err := unstructured.NestedSlice(obj.Object, segments...)
 	if err == nil && found {
+		slice = controllerOnly(slice)
 		var parts []string
 		for _, item := range slice {
 			switch v := item.(type) {
@@ -922,6 +966,24 @@ func renderScalarMap(m map[string]any) string {
 		out = out[:cut] + conditionTruncationMarker
 	}
 	return out
+}
+
+// controllerOnly (#119): of a list of references where some carry
+// `controller: true` -- metadata.ownerReferences -- keep only those. An XRD
+// is owned by its ConfigurationRevision (the controller) and its
+// Configuration; listing both made a hashed revision name look like a
+// different Configuration. Without a controller entry the list is unchanged.
+func controllerOnly(items []any) []any {
+	var ctrl []any
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok && m["controller"] == true {
+			ctrl = append(ctrl, it)
+		}
+	}
+	if len(ctrl) == 0 {
+		return items
+	}
+	return ctrl
 }
 
 func summarizeRef(m map[string]any) string {
