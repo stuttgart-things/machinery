@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/stuttgart-things/machinery/compare/v1.18.0...v1.19.0) (2026-11-25)
+
+
+### Features
+
+* readiness per kind (readyConditions, readyWithoutStatus), ownerReferences only the controller ([#120](https://github.com/stuttgart-things/machinery/issues/120)) ([ab15973](https://github.com/stuttgart-things/machinery/commit/ab15973c6fcda9c487b6b3a9d0751e955dbded6c))
+
 # [1.18.0](https://github.com/stuttgart-things/machinery/compare/v1.17.0...v1.18.0) (2026-11-25)
 
 
